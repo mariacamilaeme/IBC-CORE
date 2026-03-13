@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import Link from "next/link";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -14,50 +16,11 @@ import {
   CreditCard, Scale, Ship, Users, FileText,
 } from "lucide-react";
 
-// ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceHover: "#FCFBF9",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkSoft: "#3D4049",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  inkGhost: "#C5CAD5",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  accentDark: "#083D6E",
-  success: "#0D9F6E",
-  successBg: "#ECFDF3",
-  successSoft: "#D1FAE5",
-  warning: "#DC8B0B",
-  warningBg: "#FFF8EB",
-  danger: "#E63946",
-  dangerBg: "#FFF1F2",
-  dangerSoft: "#FECDD3",
-  blue: "#3B82F6",
-  blueBg: "#EFF6FF",
-  violet: "#7C5CFC",
-  violetBg: "#F3F0FF",
-  teal: "#0EA5A5",
-  tealBg: "#EDFCFC",
-  orange: "#F97316",
-  orangeBg: "#FFF7ED",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowMd: "0 2px 4px rgba(26,29,35,0.04), 0 8px 20px rgba(26,29,35,0.05)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px",
-  radiusMd: "14px",
-  radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── FONT LOADER & KEYFRAMES ────────────────────────────────
 const FontLoader = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap');
     @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes slideRight { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: translateX(0); } }
@@ -263,6 +226,7 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<Category>("reporte_pagos");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -321,8 +285,8 @@ export default function PaymentsPage() {
   const filtered = payments.filter(p => {
     if (p.category !== activeCategory) return false;
     if (statusFilter !== "all" && p.status !== statusFilter) return false;
-    if (search) {
-      const s = search.toLowerCase();
+    if (debouncedSearch) {
+      const s = debouncedSearch.toLowerCase();
       return (
         (p.client || "").toLowerCase().includes(s) ||
         (p.description || "").toLowerCase().includes(s) ||
@@ -454,123 +418,137 @@ export default function PaymentsPage() {
     } catch { /* ignore */ } finally { setCreatingSup(false); }
   };
 
-  // ── Excel export ──
+  // ── Excel export (all categories as separate sheets) ──
   const handleExport = async () => {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
-    const catLabel = CATEGORIES.find(c => c.key === activeCategory)?.label || activeCategory;
-    const ws = wb.addWorksheet(catLabel);
+    wb.creator = "IBC Steel Group - IBC Core";
+    wb.created = new Date();
     const FONT = "Aptos";
     const NAVY = "1E3A5F";
     const WHITE = "FFFFFF";
     const dateStr = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
+    const logoId = await addLogoToWorkbook(wb);
 
-    ws.mergeCells("A1", "K1");
-    const c1 = ws.getCell("A1");
-    c1.value = {
-      richText: [
-        { text: "IBC", font: { name: FONT, size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: FONT, size: 12, color: { argb: WHITE } } },
-        { text: `          ${catLabel.toUpperCase()}`, font: { name: FONT, size: 10, bold: true, color: { argb: WHITE } } },
-        { text: `     ${dateStr}  ·  ${filtered.length} registros`, font: { name: FONT, size: 9, color: { argb: "D0DCE8" } } },
-      ],
-    } as never;
-    c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-    c1.alignment = { vertical: "middle", horizontal: "left" };
-    ws.getRow(1).height = 40;
+    for (const cat of CATEGORIES) {
+      const catPayments = payments.filter(p => p.category === cat.key);
+      const catIsImpo = cat.key === "impo";
+      const ws = wb.addWorksheet(cat.label);
 
-    ws.getRow(2).height = 5;
-    for (let c = 1; c <= 11; c++) ws.getRow(2).getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
+      ws.mergeCells("A1", "K1");
+      const c1 = ws.getCell("A1");
+      c1.value = {
+        richText: [
+          { text: "                              ", font: { name: FONT, size: 16, color: { argb: NAVY } } },
+          { text: cat.label.toUpperCase(), font: { name: FONT, size: 12, bold: true, color: { argb: WHITE } } },
+          { text: `     ${dateStr}  ·  ${catPayments.length} registros`, font: { name: FONT, size: 9, color: { argb: "D0DCE8" } } },
+        ],
+      } as never;
+      c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+      c1.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+      ws.getRow(1).height = 52;
+      addLogoToHeader(ws, logoId, 11);
 
-    const headers = activeCategory === "impo"
-      ? ["Contrato China", "USD Factura", "% Depósito", "Saldo a Pagar", "Pago Colombia", "Proveedor", "Cuenta", "Numeral Cambiario", "Estado", "", ""]
-      : ["Cliente", "Descripción", "Contrato China", "USD Factura", "Depósito", "Saldo / % Pagado", "Pago Colombia", "Proveedor", "Cuenta", "Pago Cliente", "Observaciones"];
+      ws.getRow(2).height = 5;
+      for (let c = 1; c <= 11; c++) ws.getRow(2).getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
 
-    const headerRow = ws.getRow(3);
-    headers.forEach((h, i) => {
-      const cell = headerRow.getCell(i + 1);
-      cell.value = h;
-      cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: WHITE } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "2A4D7A" } };
-      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-      cell.border = { top: { style: "thin", color: { argb: WHITE } }, bottom: { style: "thin", color: { argb: WHITE } }, left: { style: "thin", color: { argb: WHITE } }, right: { style: "thin", color: { argb: WHITE } } };
-    });
-    headerRow.height = 28;
+      const headers = catIsImpo
+        ? ["Contrato China", "USD Factura", "% Depósito", "Saldo a Pagar", "Pago Colombia", "Proveedor", "Cuenta", "Numeral Cambiario", "Estado", "", ""]
+        : ["Cliente", "Descripción", "Contrato China", "USD Factura", "Depósito", "Saldo / % Pagado", "Pago Colombia", "Proveedor", "Cuenta", "Pago Cliente", "Observaciones"];
 
-    let rowIdx = 4;
-    const supplierGroups = Object.entries(grouped);
-    for (const [supplierName, records] of supplierGroups) {
-      ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
-      const sCell = ws.getCell(`A${rowIdx}`);
-      sCell.value = supplierName;
-      sCell.font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } };
-      sCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "E8F0FE" } };
-      sCell.alignment = { vertical: "middle" };
-      ws.getRow(rowIdx).height = 24;
-      rowIdx++;
+      const headerRow = ws.getRow(3);
+      headers.forEach((h, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: WHITE } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "2A4D7A" } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = { top: { style: "thin", color: { argb: WHITE } }, bottom: { style: "thin", color: { argb: WHITE } }, left: { style: "thin", color: { argb: WHITE } }, right: { style: "thin", color: { argb: WHITE } } };
+      });
+      headerRow.height = 28;
 
-      for (const p of records) {
-        const row = ws.getRow(rowIdx);
-        const isOdd = (rowIdx - 4) % 2 === 1;
-        const bgColor = isOdd ? "F8F7F5" : WHITE;
-        const vals = activeCategory === "impo"
-          ? [p.china_sales_contract, p.usd_invoice, p.deposit_percentage, p.balance_to_pay, p.payment_colombia, p.suppliers?.name, p.account_info, p.numeral_cambiario, STATUS_CFG[p.status]?.label || p.status, "", ""]
-          : [p.client, p.description, p.china_sales_contract, p.usd_invoice, p.deposit, p.balance_to_pay ?? p.deposit_percentage, p.payment_colombia, p.suppliers?.name, p.account_info, p.client_payment, p.remarks];
-        vals.forEach((v, i) => {
-          const cell = row.getCell(i + 1);
-          cell.value = v != null ? v : "";
-          cell.font = { name: FONT, size: 9, color: { argb: "3D4049" } };
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
-          cell.alignment = { vertical: "middle", wrapText: true };
-          cell.border = { bottom: { style: "hair", color: { argb: "EDECEA" } } };
-          if (typeof v === "number" && i !== 2) cell.numFmt = '#,##0.00';
-        });
-        row.height = 22;
+      // Group by supplier
+      const catGrouped = catPayments.reduce((acc, p) => {
+        const name = p.suppliers?.name || "Sin Proveedor";
+        if (!acc[name]) acc[name] = [];
+        acc[name].push(p);
+        return acc;
+      }, {} as Record<string, Payment[]>);
+
+      let rowIdx = 4;
+      for (const [supplierName, records] of Object.entries(catGrouped)) {
+        ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
+        const sCell = ws.getCell(`A${rowIdx}`);
+        sCell.value = supplierName;
+        sCell.font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } };
+        sCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "E8F0FE" } };
+        sCell.alignment = { vertical: "middle" };
+        ws.getRow(rowIdx).height = 24;
+        rowIdx++;
+
+        for (const p of records) {
+          const row = ws.getRow(rowIdx);
+          const isOdd = (rowIdx - 4) % 2 === 1;
+          const bgColor = isOdd ? "F8F7F5" : WHITE;
+          const vals = catIsImpo
+            ? [p.china_sales_contract, p.usd_invoice, p.deposit_percentage, p.balance_to_pay, p.payment_colombia, p.suppliers?.name, p.account_info, p.numeral_cambiario, STATUS_CFG[p.status]?.label || p.status, "", ""]
+            : [p.client, p.description, p.china_sales_contract, p.usd_invoice, p.deposit, p.balance_to_pay ?? p.deposit_percentage, p.payment_colombia, p.suppliers?.name, p.account_info, p.client_payment, p.remarks];
+          vals.forEach((v, i) => {
+            const cell = row.getCell(i + 1);
+            cell.value = v != null ? v : "";
+            cell.font = { name: FONT, size: 9, color: { argb: "3D4049" } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
+            cell.alignment = { vertical: "middle", wrapText: true };
+            cell.border = { bottom: { style: "hair", color: { argb: "EDECEA" } } };
+            if (typeof v === "number" && i !== 2) cell.numFmt = '#,##0.00';
+          });
+          row.height = 22;
+          rowIdx++;
+        }
+
+        const subRow = ws.getRow(rowIdx);
+        const subTotal = records.reduce((s, p) => s + (p.client_payment || 0), 0);
+        const subDeposit = records.reduce((s, p) => s + (p.deposit || 0), 0);
+        for (let c = 1; c <= 11; c++) {
+          const cell = subRow.getCell(c);
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F0EDE8" } };
+          cell.border = { top: { style: "thin", color: { argb: "D4D2CD" } } };
+        }
+        subRow.getCell(1).value = "SUBTOTAL";
+        subRow.getCell(1).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
+        if (!catIsImpo) {
+          subRow.getCell(5).value = subDeposit || "";
+          subRow.getCell(5).numFmt = '#,##0.00';
+          subRow.getCell(5).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
+          subRow.getCell(10).value = subTotal || "";
+          subRow.getCell(10).numFmt = '#,##0.00';
+          subRow.getCell(10).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
+        }
+        subRow.height = 22;
+        rowIdx++;
         rowIdx++;
       }
 
-      const subRow = ws.getRow(rowIdx);
-      const subTotal = records.reduce((s, p) => s + (p.client_payment || 0), 0);
-      const subDeposit = records.reduce((s, p) => s + (p.deposit || 0), 0);
-      for (let c = 1; c <= 11; c++) {
-        const cell = subRow.getCell(c);
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F0EDE8" } };
-        cell.border = { top: { style: "thin", color: { argb: "D4D2CD" } } };
-      }
-      subRow.getCell(1).value = "SUBTOTAL";
-      subRow.getCell(1).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
-      if (activeCategory !== "impo") {
-        subRow.getCell(5).value = subDeposit || "";
-        subRow.getCell(5).numFmt = '#,##0.00';
-        subRow.getCell(5).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
-        subRow.getCell(10).value = subTotal || "";
-        subRow.getCell(10).numFmt = '#,##0.00';
-        subRow.getCell(10).font = { name: FONT, size: 9, bold: true, color: { argb: NAVY } };
-      }
-      subRow.height = 22;
-      rowIdx++;
-      rowIdx++;
+      ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
+      const fCell = ws.getCell(`A${rowIdx}`);
+      fCell.value = `IBC STEEL GROUP  ·  Generado ${dateStr}`;
+      fCell.font = { name: FONT, size: 8, italic: true, color: { argb: "9CA3B4" } };
+      fCell.alignment = { horizontal: "center" };
+
+      const widths = catIsImpo
+        ? [20, 14, 12, 14, 18, 24, 30, 16, 12, 10, 10]
+        : [22, 20, 20, 14, 14, 16, 18, 24, 30, 14, 24];
+      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.views = [{ state: "frozen" as const, xSplit: 0, ySplit: 3, activeCell: "A4" }];
+      ws.autoFilter = { from: "A3", to: `K3` };
     }
-
-    ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
-    const fCell = ws.getCell(`A${rowIdx}`);
-    fCell.value = `IBC STEEL GROUP  ·  Generado ${dateStr}`;
-    fCell.font = { name: FONT, size: 8, italic: true, color: { argb: "9CA3B4" } };
-    fCell.alignment = { horizontal: "center" };
-
-    const widths = activeCategory === "impo"
-      ? [20, 14, 12, 14, 18, 24, 30, 16, 12, 10, 10]
-      : [22, 20, 20, 14, 14, 16, 18, 24, 30, 14, 24];
-    widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-    ws.views = [{ state: "frozen" as const, xSplit: 0, ySplit: 3, activeCell: "A4" }];
-    ws.autoFilter = { from: "A3", to: `K3` };
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `IBC_${catLabel.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `IBC_Reporte_Pagos_Completo_${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };

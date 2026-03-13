@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/search
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const pattern = `%${query}%`;
+    const pattern = `%${sanitizePostgrestValue(query)}%`;
     const isComercial = profile.role === "comercial";
 
     // Build all queries in parallel
@@ -133,13 +134,15 @@ export async function GET(request: NextRequest) {
         shipmentsPromise,
       ]);
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       contracts: contracts.data || [],
       clients: clients.data || [],
       quotations: quotations.data || [],
       invoices: invoices.data || [],
       shipments: shipments.data || [],
     });
+    res.headers.set("Cache-Control", "private, max-age=10");
+    return res;
   } catch (error) {
     console.error("Search API error:", error);
     return NextResponse.json(

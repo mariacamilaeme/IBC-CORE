@@ -233,12 +233,30 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #94a3b8;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #64748b;
+}
+
+/* Scrollbar dentro del sidebar - colores claros sobre fondo oscuro */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
 }
 
 /* Dashboard v2 animations */
@@ -303,4 +321,186 @@
 }
 .wr-hover-glow:hover {
   background: #FCFBF9;
+}
+
+/* ══════════════════════════════════════════════════════
+   Wiki Module - Premium Animations
+   ══════════════════════════════════════════════════════ */
+
+/* Staggered card entrance */
+@keyframes wikiCardIn {
+  0% { opacity: 0; transform: translateY(24px) scale(0.96); }
+  60% { opacity: 1; transform: translateY(-4px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Tab content slide */
+@keyframes wikiTabSlide {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Floating gradient orb background */
+@keyframes wikiOrbFloat {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(30px, -20px) scale(1.05); }
+  50% { transform: translate(-10px, 15px) scale(0.95); }
+  75% { transform: translate(-25px, -10px) scale(1.02); }
+}
+
+/* Shimmer for empty states */
+@keyframes wikiShimmer {
+  0% { background-position: -300% 0; }
+  100% { background-position: 300% 0; }
+}
+
+/* Icon bounce on hover */
+@keyframes wikiBounce {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+  60% { transform: translateY(-3px); }
+}
+
+/* Pulse ring for active items */
+@keyframes wikiPulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(11, 83, 148, 0.25); }
+  70% { box-shadow: 0 0 0 8px rgba(11, 83, 148, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(11, 83, 148, 0); }
+}
+
+/* Gradient text animation */
+@keyframes wikiGradientText {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Lock icon spin for password manager */
+@keyframes wikiLockSpin {
+  0% { transform: rotateY(0deg); }
+  100% { transform: rotateY(360deg); }
+}
+
+/* Typewriter cursor blink */
+@keyframes wikiCursorBlink {
+  0%, 50% { border-right-color: #0B5394; }
+  51%, 100% { border-right-color: transparent; }
+}
+
+/* Smooth expand for accordions */
+@keyframes wikiExpand {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 600px; }
+}
+
+/* Badge pop in */
+@keyframes wikiBadgePop {
+  0% { opacity: 0; transform: scale(0.5); }
+  60% { transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.wiki-card {
+  animation: wikiCardIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.wiki-tab-content {
+  animation: wikiTabSlide 0.35s ease-out both;
+}
+.wiki-hover-bounce:hover .wiki-icon {
+  animation: wikiBounce 0.5s ease both;
+}
+.wiki-pulse-ring {
+  animation: wikiPulseRing 2s ease infinite;
+}
+.wiki-gradient-text {
+  background: linear-gradient(135deg, #0B5394, #7C5CFC, #0EA5A5, #0B5394);
+  background-size: 300% 300%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: wikiGradientText 4s ease infinite;
+}
+.wiki-shimmer-bg {
+  background: linear-gradient(90deg, transparent 25%, rgba(11, 83, 148, 0.04) 50%, transparent 75%);
+  background-size: 300% 100%;
+  animation: wikiShimmer 3s ease-in-out infinite;
+}
+.wiki-hover-lift {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.wiki-hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px -5px rgba(11, 83, 148, 0.12), 0 4px 10px -5px rgba(11, 83, 148, 0.06);
+}
+.wiki-badge-pop {
+  animation: wikiBadgePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.wiki-expand {
+  animation: wikiExpand 0.4s ease-out both;
+  overflow: hidden;
+}
+
+/* Rich text editor styling */
+.wiki-editor-content {
+  font-family: var(--font-dm-sans);
+  line-height: 1.75;
+  letter-spacing: -0.01em;
+}
+.wiki-editor-content h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; color: #18191D; }
+.wiki-editor-content h2 { font-size: 1.375rem; font-weight: 600; margin-bottom: 0.5rem; color: #3D4049; }
+.wiki-editor-content h3 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem; color: #3D4049; }
+.wiki-editor-content p { margin-bottom: 0.75rem; color: #3D4049; }
+.wiki-editor-content ul, .wiki-editor-content ol { margin-left: 1.5rem; margin-bottom: 0.75rem; }
+.wiki-editor-content li { margin-bottom: 0.25rem; color: #3D4049; }
+.wiki-editor-content blockquote {
+  border-left: 3px solid #0B5394;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #6B7080;
+  font-style: italic;
+}
+.wiki-editor-content code {
+  font-family: var(--font-jetbrains-mono);
+  background: #F0EDE8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+  color: #0B5394;
+}
+.wiki-editor-content pre {
+  font-family: var(--font-jetbrains-mono);
+  background: #1E293B;
+  color: #E2E8F0;
+  padding: 1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+/* Orb floating background */
+.wiki-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.12;
+  pointer-events: none;
+  animation: wikiOrbFloat 12s ease-in-out infinite;
+}
+.wiki-orb-1 {
+  width: 300px; height: 300px;
+  background: #0B5394;
+  top: -50px; right: -80px;
+  animation-delay: 0s;
+}
+.wiki-orb-2 {
+  width: 200px; height: 200px;
+  background: #7C5CFC;
+  bottom: -30px; left: -60px;
+  animation-delay: -4s;
+}
+.wiki-orb-3 {
+  width: 150px; height: 150px;
+  background: #0EA5A5;
+  top: 40%; left: 50%;
+  animation-delay: -8s;
 }

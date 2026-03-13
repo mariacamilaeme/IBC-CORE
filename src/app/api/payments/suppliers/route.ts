@@ -10,16 +10,25 @@ export async function GET() {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
+    // Check role — comercial should not see bank details
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    const isComercial = profile?.role === "comercial";
+
+    const selectFields = isComercial ? "id, name" : "*";
+
     const { data, error } = await supabase
       .from("suppliers")
-      .select("*")
-      .order("name", { ascending: true });
+      .select(selectFields)
+      .order("name", { ascending: true })
+      .limit(500);
 
     if (error) {
       return NextResponse.json({ error: "Error al obtener proveedores" }, { status: 500 });
     }
 
-    return NextResponse.json({ data: data || [] });
+    const res = NextResponse.json({ data: data || [] });
+    res.headers.set("Cache-Control", "private, max-age=300");
+    return res;
   } catch {
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
@@ -32,6 +41,25 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    // Get user profile to check role
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, full_name")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json({ error: "Perfil de usuario no encontrado" }, { status: 403 });
+    }
+
+    // Role check: comercial users cannot create suppliers
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();

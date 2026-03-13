@@ -2,7 +2,9 @@
 
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
-import { Download, Loader2, FileText, RefreshCw } from "lucide-react";
+import { Download, Loader2, FileText, RefreshCw, FileDown } from "lucide-react";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -49,6 +51,7 @@ export default function QuotationsReportPage() {
       });
 
       const NAVY = "1E3A5F"; const WHITE = "FFFFFF"; const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       const columns = [
         { header: "No. Cotización", key: "id", width: 16 },
@@ -78,19 +81,19 @@ export default function QuotationsReportPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: WHITE } } },
-        { text: `          COTIZACIONES`, font: { name: "Aptos", size: 10, bold: true, color: { argb: WHITE } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "COTIZACIONES", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${filtered.length} cotizaciones`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2
       const r2 = ws.addRow([""]); ws.mergeCells(2, 1, 2, totalCols); r2.height = 5;
@@ -156,6 +159,55 @@ export default function QuotationsReportPage() {
   };
 
   // ---------------------------------------------------------------------------
+  // PDF Export
+  // ---------------------------------------------------------------------------
+
+  const handlePDF = async () => {
+    try {
+      toast.info("Generando PDF...");
+      await generatePDFReport({
+        title: "COTIZACIONES",
+        subtitle: "Reporte completo de cotizaciones",
+        filename: "IBC_Cotizaciones",
+        recordLabel: "cotizaciones",
+        orientation: "landscape",
+        columns: [
+          { header: "COT.", dataKey: "id", width: 0.8, bold: true, color: "#1E3A5F" },
+          { header: "CLIENTE", dataKey: "customer", width: 1.3, bold: true },
+          { header: "MATERIALES", dataKey: "materials", width: 2 },
+          { header: "ESTADO", dataKey: "status", width: 0.9, halign: "center" },
+          { header: "LÍNEA", dataKey: "category", width: 0.7, halign: "center" },
+          { header: "COMERCIAL", dataKey: "requestedBy", width: 1 },
+          { header: "PAÍS", dataKey: "country", width: 0.7, halign: "center" },
+          { header: "SOLICITUD", dataKey: "requestDate", width: 0.8, halign: "center" },
+          { header: "EMISIÓN", dataKey: "issueDate", width: 0.8, halign: "center" },
+          { header: "RESP.", dataKey: "responseTime", width: 0.5, halign: "center" },
+          { header: "CHINA", dataKey: "chinaTime", width: 0.5, halign: "center" },
+          { header: "CONTRATO", dataKey: "contractNo", width: 0.9, bold: true, color: "#1E3A5F" },
+        ],
+        data: filtered.map((r) => ({
+          id: r.id ?? "",
+          customer: r.customer,
+          materials: r.materials,
+          status: r.status,
+          category: r.category,
+          requestedBy: r.requestedBy,
+          country: r.country,
+          requestDate: r.requestDate ?? "",
+          issueDate: r.issueDate ?? "",
+          responseTime: r.responseTime ?? "",
+          chinaTime: r.chinaTime ?? "",
+          contractNo: r.contractNo ?? "",
+        })),
+      });
+      toast.success("PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el PDF");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -174,6 +226,9 @@ export default function QuotationsReportPage() {
             <span className="text-sm font-semibold text-orange-700">{data.length}</span>
             <span className="text-xs text-orange-600">cotizaciones</span>
           </div>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50" variant="outline" onClick={handlePDF}>
+            <FileDown className="w-3.5 h-3.5" /> Export PDF
+          </Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25" onClick={handleExport}>
             <Download className="w-3.5 h-3.5" /> Export Excel
           </Button>

@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
       else if (list.length > 1) query = query.in("industry_sector", list);
     }
 
-    const { data: clients, error } = await query;
+    const { data: clients, error } = await query.limit(5000);
 
     if (error) {
       console.error("Error fetching client filter options:", error);
@@ -84,12 +84,14 @@ export async function GET(request: NextRequest) {
       commercials = profiles || [];
     }
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       client_types: unique(clients?.map((c) => c.client_type)),
       countries: unique(clients?.map((c) => c.country)),
       commercials,
       industry_sectors: unique(clients?.map((c) => c.industry_sector)),
     });
+    res.headers.set("Cache-Control", "private, max-age=30");
+    return res;
   } catch (error) {
     console.error("Unexpected error in GET /api/clients/filters:", error);
     return NextResponse.json(

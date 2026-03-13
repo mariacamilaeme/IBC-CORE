@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       else if (list.length > 1) query = query.in("eta_final", list);
     }
 
-    const { data: contracts, error } = await query;
+    const { data: contracts, error } = await query.limit(5000);
 
     if (error) {
       console.error("Error fetching filter options:", error);
@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
     const unique = (arr: (string | null | undefined)[]) =>
       [...new Set(arr.filter((v): v is string => !!v && v.trim() !== ""))].sort();
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       commercial_names: unique(contracts?.map((c) => c.commercial_name)),
       client_names: unique(contracts?.map((c) => c.client_name)),
       vessel_names: unique(contracts?.map((c) => c.vessel_name)),
@@ -114,6 +114,8 @@ export async function GET(request: NextRequest) {
       product_types: unique(contracts?.map((c) => c.product_type)),
       eta_final_dates: unique(contracts?.map((c) => c.eta_final)),
     });
+    res.headers.set("Cache-Control", "private, max-age=30");
+    return res;
   } catch (error) {
     console.error("Unexpected error in GET /api/contracts/filters:", error);
     return NextResponse.json(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/types";
 import type { User } from "@supabase/supabase-js";
@@ -91,5 +91,19 @@ export function useAuth() {
     window.location.href = "/login";
   };
 
-  return { user: state.user, profile: state.profile, loading: state.loading, signOut };
+  const refreshProfile = async () => {
+    const currentUser = authState.user;
+    if (!currentUser) return;
+    const supabase = createClient();
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", currentUser.id)
+      .single();
+    if (profileData) {
+      setAuthState({ profile: profileData });
+    }
+  };
+
+  return { user: state.user, profile: state.profile, loading: state.loading, signOut, refreshProfile };
 }

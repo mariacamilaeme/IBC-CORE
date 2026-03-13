@@ -95,42 +95,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import Link from "next/link";
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceHover: "#FCFBF9",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkSoft: "#3D4049",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  inkGhost: "#C5CAD5",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  accentDark: "#083D6E",
-  success: "#0D9F6E",
-  successBg: "#ECFDF3",
-  warning: "#DC8B0B",
-  warningBg: "#FFF8EB",
-  danger: "#E63946",
-  dangerBg: "#FFF1F2",
-  blue: "#3B82F6",
-  blueBg: "#EFF6FF",
-  violet: "#7C5CFC",
-  violetBg: "#F3F0FF",
-  teal: "#0EA5A5",
-  tealBg: "#EDFCFC",
-  orange: "#F97316",
-  orangeBg: "#FFF7ED",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowMd: "0 2px 4px rgba(26,29,35,0.04), 0 8px 20px rgba(26,29,35,0.05)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px",
-  radiusMd: "14px",
-  radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -148,6 +113,7 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
     const start = animRef.current;
     const diff = value - start;
     if (diff === 0) return;
+    let rafId: number;
     const duration = 1200;
     const startTime = performance.now();
     const step = (now: number) => {
@@ -156,10 +122,11 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
       const eased = 1 - Math.pow(1 - progress, 4);
       const current = Math.round(start + diff * eased);
       setDisplay(current);
-      if (progress < 1) requestAnimationFrame(step);
+      if (progress < 1) rafId = requestAnimationFrame(step);
       else animRef.current = value;
     };
-    requestAnimationFrame(step);
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
   }, [value]);
   return <>{prefix}{display.toLocaleString("es-CO")}{suffix}</>;
 }
@@ -188,6 +155,7 @@ function AnimCurrency({ value }: { value: number }) {
     const start = animRef.current;
     const diff = value - start;
     if (diff === 0) return;
+    let rafId: number;
     const duration = 1200;
     const startTime = performance.now();
     const step = (now: number) => {
@@ -196,10 +164,11 @@ function AnimCurrency({ value }: { value: number }) {
       const eased = 1 - Math.pow(1 - progress, 4);
       const current = start + diff * eased;
       setDisplay(current);
-      if (progress < 1) requestAnimationFrame(step);
+      if (progress < 1) rafId = requestAnimationFrame(step);
       else animRef.current = value;
     };
-    requestAnimationFrame(step);
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
   }, [value]);
   return <>US$ {display.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</>;
 }
@@ -403,8 +372,8 @@ export default function ShipmentsPage() {
       const res = await fetch("/api/vessels");
       const json = await res.json();
       if (res.ok) setVessels(json.data || []);
-    } catch {
-      console.error("Error fetching vessels");
+    } catch (err) {
+      console.error("Error fetching vessels", err);
     }
   }, []);
 
@@ -413,8 +382,8 @@ export default function ShipmentsPage() {
       const res = await fetch("/api/clients");
       const json = await res.json();
       if (res.ok) setClients(json.data || []);
-    } catch {
-      console.error("Error fetching clients");
+    } catch (err) {
+      console.error("Error fetching clients", err);
     }
   }, []);
 
@@ -427,8 +396,8 @@ export default function ShipmentsPage() {
         .in("role", ["comercial", "admin", "directora"])
         .order("full_name");
       if (data) setCommercials(data);
-    } catch {
-      console.error("Error fetching commercials");
+    } catch (err) {
+      console.error("Error fetching commercials", err);
     }
   }, [supabase]);
 
@@ -455,8 +424,8 @@ export default function ShipmentsPage() {
         );
         setVesselContracts(filtered);
       }
-    } catch {
-      console.error("Error fetching contracts for vessel grouping");
+    } catch (err) {
+      console.error("Error fetching contracts for vessel grouping", err);
     } finally {
       setVesselContractsLoading(false);
     }

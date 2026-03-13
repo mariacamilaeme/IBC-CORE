@@ -143,6 +143,8 @@ export interface Profile {
   full_name: string;
   email: string;
   role: UserRole;
+  role_id: string | null;
+  position: string | null;
   phone: string | null;
   avatar_url: string | null;
   is_active: boolean | null;
@@ -150,6 +152,72 @@ export interface Profile {
   notes: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+// ----- 1b. Role -----
+export interface Role {
+  id?: string;
+  name: string;
+  display_name: string;
+  description: string | null;
+  is_system: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ----- 1c. Permission -----
+export type ModuleName =
+  | 'dashboard'
+  | 'contracts'
+  | 'clients'
+  | 'quotations'
+  | 'invoices'
+  | 'packing_lists'
+  | 'packing_list_converter'
+  | 'shipments'
+  | 'payments'
+  | 'reports'
+  | 'calendar'
+  | 'settings'
+  | 'wiki';
+
+export interface Permission {
+  id?: string;
+  role_id: string;
+  module: ModuleName;
+  can_view: boolean;
+  can_create: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ----- 1d. Invitation -----
+export type InvitationStatus = 'pending' | 'accepted' | 'expired' | 'cancelled';
+
+export interface Invitation {
+  id?: string;
+  email: string;
+  name: string | null;
+  role_id: string;
+  token: string;
+  status: InvitationStatus;
+  expires_at: string;
+  accepted_at: string | null;
+  invited_by: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InvitationWithRelations extends Invitation {
+  role?: Role;
+  invited_by_profile?: Profile;
+}
+
+export interface ProfileWithRole extends Profile {
+  role_data?: Role;
 }
 
 // ----- 2. SystemConfig -----
@@ -464,6 +532,10 @@ export type InsertShipment = Omit<Shipment, 'id' | 'created_at' | 'updated_at'>;
 export type InsertProductionReport = Omit<ProductionReport, 'id' | 'created_at' | 'updated_at'>;
 export type InsertReminder = Omit<Reminder, 'id' | 'created_at' | 'updated_at'>;
 export type InsertAuditLog = Omit<AuditLog, 'id' | 'created_at'>;
+export type InsertRole = Omit<Role, 'id' | 'created_at' | 'updated_at'>;
+export type UpdateRole = Partial<Role> & { id: string };
+export type InsertPermission = Omit<Permission, 'id' | 'created_at' | 'updated_at'>;
+export type InsertInvitation = Omit<Invitation, 'id' | 'created_at' | 'updated_at'>;
 
 /** Update type: all fields optional except id */
 export type UpdateProfile = Partial<Profile> & { id: string };

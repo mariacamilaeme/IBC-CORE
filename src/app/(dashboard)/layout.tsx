@@ -14,7 +14,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === "/";
 
   return (
-    <div className="flex min-h-screen" style={{ background: "#F5F3EF" }}>
+    <div className="flex min-h-screen" style={{ background: "linear-gradient(145deg, #F5F3EF 0%, #EDE9E3 35%, #E8E4DE 65%, #F0ECE6 100%)" }}>
       <Sidebar />
       <div
         className="flex-1 transition-all duration-300"

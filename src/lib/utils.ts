@@ -170,3 +170,11 @@ export const REMINDER_LEAD_OPTIONS = [
   { value: "2_weeks", label: "2 semanas antes", offset: 14 },
   { value: "1_month", label: "1 mes antes", offset: 30 },
 ];
+
+/**
+ * Sanitize user input for use in PostgREST .or() filter strings.
+ * Escapes characters that could inject additional filter clauses.
+ */
+export function sanitizePostgrestValue(input: string): string {
+  return input.replace(/[,.()*\\]/g, "");
+}

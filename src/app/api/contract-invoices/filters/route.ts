@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       else if (list.length > 1) query = query.in("customer_name", list);
     }
 
-    const { data: invoices, error } = await query;
+    const { data: invoices, error } = await query.limit(5000);
 
     if (error) {
       console.error("Error fetching filter options:", error);
@@ -46,9 +46,11 @@ export async function GET(request: NextRequest) {
     const unique = (arr: (string | null | undefined)[]) =>
       [...new Set(arr.filter((v): v is string => !!v && v.trim() !== ""))].sort();
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       customer_names: unique(invoices?.map((c) => c.customer_name)),
     });
+    res.headers.set("Cache-Control", "private, max-age=30");
+    return res;
   } catch (error) {
     console.error("Unexpected error in GET /api/contract-invoices/filters:", error);
     return NextResponse.json(

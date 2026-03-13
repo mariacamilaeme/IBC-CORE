@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { Download, Loader2, ClipboardList, RefreshCw } from "lucide-react";
+import { Download, Loader2, ClipboardList, RefreshCw, FileDown } from "lucide-react";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -73,6 +75,7 @@ export default function ContractsReportPage() {
       const NAVY = "1E3A5F";
       const WHITE = "FFFFFF";
       const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       ws.columns = [
         { key: "contract_date", width: 14 },
@@ -106,19 +109,19 @@ export default function ContractsReportPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: WHITE } } },
-        { text: `          CONTRATOS`, font: { name: "Aptos", size: 10, bold: true, color: { argb: WHITE } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "CONTRATOS", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${contracts.length} contratos`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
@@ -217,6 +220,61 @@ export default function ContractsReportPage() {
   };
 
   // ---------------------------------------------------------------------------
+  // PDF Export
+  // ---------------------------------------------------------------------------
+
+  const handlePDF = async () => {
+    try {
+      toast.info("Generando reporte PDF...");
+      await generatePDFReport({
+        title: "CONTRATOS",
+        subtitle: "Reporte completo de contratos",
+        filename: "Contratos_IBC",
+        recordLabel: "contratos",
+        orientation: "landscape",
+        columns: [
+          { header: "FECHA", dataKey: "fecha", width: 0.8, halign: "center" },
+          { header: "CONTRATO CHINA", dataKey: "china", width: 1.2, bold: true, color: "#1E3A5F" },
+          { header: "CONTRATO CLIENTE", dataKey: "cliente_c", width: 1.1, bold: true, color: "#1E3A5F" },
+          { header: "COMERCIAL", dataKey: "comercial", width: 1 },
+          { header: "CLIENTE", dataKey: "cliente", width: 1.3, bold: true },
+          { header: "PAÍS", dataKey: "pais", width: 0.7, halign: "center" },
+          { header: "DETALLE", dataKey: "detalle", width: 2 },
+          { header: "TONS", dataKey: "tons", width: 0.7, halign: "right" },
+          { header: "INCOTERM", dataKey: "incoterm", width: 0.6, halign: "center" },
+          { header: "ESTADO", dataKey: "estado", width: 1.1, halign: "center" },
+          { header: "ETA", dataKey: "eta", width: 0.8, halign: "center" },
+          { header: "MOTONAVE", dataKey: "motonave", width: 1 },
+          { header: "PUERTO", dataKey: "puerto", width: 0.9 },
+          { header: "ANTICIPO", dataKey: "anticipo", width: 0.7 },
+          { header: "PDTE USD", dataKey: "pdte", width: 0.9, halign: "right", bold: true },
+        ],
+        data: contracts.map((c) => ({
+          fecha: fmtDate(c.contract_date),
+          china: c.china_contract || "",
+          cliente_c: c.client_contract || "",
+          comercial: c.commercial_name || "",
+          cliente: c.client_name || "",
+          pais: c.country || "",
+          detalle: c.detail || "",
+          tons: fmtNum(c.tons_agreed),
+          incoterm: c.incoterm || "",
+          estado: c.status || "",
+          eta: fmtDate(c.eta_final),
+          motonave: c.vessel_name || "",
+          puerto: c.arrival_port || "",
+          anticipo: c.advance_paid || "",
+          pdte: fmtNum(c.pending_client_amount),
+        })),
+      });
+      toast.success("PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el PDF");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -237,6 +295,9 @@ export default function ContractsReportPage() {
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl border-slate-200" onClick={fetchData}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </Button>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50" variant="outline" onClick={handlePDF}>
+            <FileDown className="w-3.5 h-3.5" /> Export PDF
           </Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25" onClick={handleExport}>
             <Download className="w-3.5 h-3.5" /> Export Excel

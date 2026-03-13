@@ -4,40 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-// ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceHover: "#FCFBF9",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkSoft: "#3D4049",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  inkGhost: "#C5CAD5",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  accentDark: "#083D6E",
-  success: "#0D9F6E",
-  successBg: "#ECFDF3",
-  warning: "#DC8B0B",
-  warningBg: "#FFF8EB",
-  blue: "#3B82F6",
-  blueBg: "#EFF6FF",
-  violet: "#7C5CFC",
-  violetBg: "#F3F0FF",
-  teal: "#0EA5A5",
-  tealBg: "#EDFCFC",
-  orange: "#F97316",
-  orangeBg: "#FFF7ED",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px",
-  radiusMd: "14px",
-  radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -172,8 +139,8 @@ export default function ReportsHubPage() {
         if (contRes.ok) { const j = await contRes.json(); setContractsCount(j.count || 0); }
         if (payRes.ok) { const j = await payRes.json(); setPaymentsCount(j.count || 0); }
         if (invRes.ok) { const j = await invRes.json(); setInvoicesCount(j.count || 0); }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error("Error fetching report counts:", err);
       }
       // Quotations come from localStorage / static data, so just set a placeholder
       try {
@@ -181,7 +148,7 @@ export default function ReportsHubPage() {
         const base = 171; // approximate base data count
         const custom = stored ? JSON.parse(stored).length : 0;
         setQuotationsCount(base + custom);
-      } catch { /* ignore */ }
+      } catch (err) { console.error("Error reading quotation counts:", err); }
     };
     fetchCounts();
   }, []);

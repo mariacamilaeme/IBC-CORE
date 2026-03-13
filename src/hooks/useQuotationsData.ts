@@ -1,19 +1,24 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { ReportQuotation } from "@/app/(dashboard)/quotations/constants";
-import REPORT_DATA from "@/data/quotations-report.json";
 
 // ---------------------------------------------------------------------------
 // Shared quotation data management across sub-modules (tracking, reports, create).
 // Uses localStorage as persistent store and a custom DOM event to keep every
 // mounted consumer in sync — even across different pages in the same tab.
 //
-// Also reads commercial name overrides from localStorage (managed by
-// useCommercials) to resolve renamed commercial names in the data.
+// Base data is loaded from an authenticated API route instead of a static
+// import to prevent sensitive business data from being bundled in client JS.
 // ---------------------------------------------------------------------------
 
-const BASE_DATA: ReportQuotation[] = REPORT_DATA as ReportQuotation[];
+// Module-level cache so the API is only called once per page load.
+// Call invalidateQuotationsCache() to force a refresh on next mount.
+let cachedBaseData: ReportQuotation[] | null = null;
+
+export function invalidateQuotationsCache() {
+  cachedBaseData = null;
+}
 
 const CUSTOM_KEY = "ibc-quotations-custom";
 const EDITS_KEY = "ibc-quotations-edits";
@@ -63,9 +68,28 @@ function persist(custom: ReportQuotation[], edits: Record<string, ReportQuotatio
 // ---------------------------------------------------------------------------
 
 export function useQuotationsData() {
+  const [baseData, setBaseData] = useState<ReportQuotation[]>(cachedBaseData || []);
+  const [loading, setLoading] = useState(!cachedBaseData);
   const [customQuotations, setCustomQuotations] = useState<ReportQuotation[]>(readCustom);
   const [editOverrides, setEditOverrides] = useState<Record<string, ReportQuotation>>(readEdits);
   const [commercialOverrides, setCommercialOverrides] = useState<Record<string, string>>(readCommercialOverrides);
+  const fetchedRef = useRef(false);
+
+  // Fetch base data from authenticated API (once per page load)
+  useEffect(() => {
+    if (cachedBaseData || fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    fetch("/api/quotations/report-data")
+      .then((res) => res.json())
+      .then((json) => {
+        const items = (json.data || []) as ReportQuotation[];
+        cachedBaseData = items;
+        setBaseData(items);
+      })
+      .catch((err) => console.error("Error loading quotations base data:", err))
+      .finally(() => setLoading(false));
+  }, []);
 
   // Keep in sync with other hook instances & other pages in same tab
   useEffect(() => {
@@ -96,7 +120,7 @@ export function useQuotationsData() {
   // Merged data: base + edit overrides + custom quotations
   // Applies commercial name overrides (renames) to requestedBy field
   const data = useMemo(() => {
-    const edited = BASE_DATA.map((q) => {
+    const edited = baseData.map((q) => {
       const key = q.id ?? "";
       return editOverrides[key] ? { ...q, ...editOverrides[key] } : q;
     });
@@ -111,12 +135,12 @@ export function useQuotationsData() {
     }
 
     return merged;
-  }, [customQuotations, editOverrides, commercialOverrides]);
+  }, [baseData, customQuotations, editOverrides, commercialOverrides]);
 
   // Add a new quotation (auto-generates COT-NNN id)
   const addQuotation = useCallback((q: ReportQuotation) => {
     setCustomQuotations((prev) => {
-      const allData = [...BASE_DATA, ...prev];
+      const allData = [...baseData, ...prev];
       const maxNum = allData.reduce((max, d) => {
         const m = d.id?.match(/COT-(\d+)/);
         return m ? Math.max(max, parseInt(m[1], 10)) : max;
@@ -126,7 +150,7 @@ export function useQuotationsData() {
       persist(updated, readEdits());
       return updated;
     });
-  }, []);
+  }, [baseData]);
 
   // Update an existing quotation (custom or base)
   const updateQuotation = useCallback((q: ReportQuotation) => {
@@ -149,6 +173,7 @@ export function useQuotationsData() {
 
   return {
     data,
+    loading,
     customQuotations,
     addQuotation,
     updateQuotation,

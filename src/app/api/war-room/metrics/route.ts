@@ -11,7 +11,7 @@ export async function GET() {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).single();
     if (profileError || !profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 403 });
 
     const now = new Date();
@@ -148,7 +148,7 @@ export async function GET() {
     const completedMonth = tasksCompletedMonth.count || 0;
     const monthlyRate = totalMonth > 0 ? Math.round((completedMonth / totalMonth) * 100) : 0;
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       tasks_today: tasksToday.count || 0,
       completed_this_week: (tasksCompletedWeek.count || 0) + (remindersCompletedWeek.count || 0),
       overdue_count: (tasksOverdue.count || 0) + (remindersOverdue.count || 0),
@@ -158,6 +158,8 @@ export async function GET() {
       monthly_completion_rate: monthlyRate,
       category_distribution: categoryDistribution,
     });
+    res.headers.set("Cache-Control", "private, max-age=60");
+    return res;
   } catch (error) {
     console.error("Unexpected error in GET /api/war-room/metrics:", error);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });

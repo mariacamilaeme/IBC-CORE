@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/reminders
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
     // ---- Get user profile / role ----
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -62,8 +63,9 @@ export async function GET(request: NextRequest) {
 
     // ---- Apply optional filters ----
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `title.ilike.%${search}%,description.ilike.%${search}%`
+        `title.ilike.%${s}%,description.ilike.%${s}%`
       );
     }
 
@@ -89,7 +91,7 @@ export async function GET(request: NextRequest) {
       query = query.lte("due_date", `${dateTo}T23:59:59`);
     }
 
-    const { data: reminders, error: queryError } = await query;
+    const { data: reminders, error: queryError } = await query.limit(500);
 
     if (queryError) {
       console.error("Error fetching reminders:", queryError);
@@ -135,7 +137,7 @@ export async function POST(request: NextRequest) {
     // ---- Get user profile for audit log ----
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -169,6 +171,11 @@ export async function POST(request: NextRequest) {
         { error: "La fecha de recordatorio es obligatoria" },
         { status: 400 }
       );
+    }
+
+    // Comercial can only assign reminders to themselves
+    if (profile.role === "comercial" && body.assigned_to && body.assigned_to !== user.id) {
+      return NextResponse.json({ error: "No tiene permisos para asignar recordatorios a otros usuarios" }, { status: 403 });
     }
 
     // ---- Prepare reminder data ----
@@ -273,7 +280,7 @@ export async function PATCH(request: NextRequest) {
     // ---- Get user profile for audit log ----
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -306,6 +313,16 @@ export async function PATCH(request: NextRequest) {
         { error: "Recordatorio no encontrado" },
         { status: 404 }
       );
+    }
+
+    // Ownership check: non-admin users can only update their own reminders
+    if (profile.role !== "admin" && profile.role !== "directora") {
+      if (existingReminder.assigned_to !== user.id && existingReminder.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "No tiene permisos para editar este recordatorio" },
+          { status: 403 }
+        );
+      }
     }
 
     // ---- Build update data ----

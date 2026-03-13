@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import Link from "next/link";
 import {
   Plus,
@@ -149,7 +150,7 @@ export default function ContractInvoicesPage() {
 
   // Filter state
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(searchTerm, 300);
   const [approvedFilter, setApprovedFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -158,17 +159,8 @@ export default function ContractInvoicesPage() {
   const [editingInvoice, setEditingInvoice] = useState<ContractInvoice | null>(null);
   const [formData, setFormData] = useState<ContractInvoiceFormData>({ ...EMPTY_FORM });
 
-  // =====================================================
-  // Debounced search
-  // =====================================================
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchTerm);
-      setCurrentPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  // Reset page on search change
+  useEffect(() => { setCurrentPage(1); }, [debouncedSearch]);
 
   // =====================================================
   // Data Fetching
@@ -405,7 +397,6 @@ export default function ContractInvoicesPage() {
 
   const clearFilters = () => {
     setSearchTerm("");
-    setDebouncedSearch("");
     setApprovedFilter("all");
     setCurrentPage(1);
   };

@@ -2,21 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 
-// ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── ICONS ───────────────────────────────────────────────────
 const TabIcons = {

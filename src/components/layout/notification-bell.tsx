@@ -2,8 +2,15 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Clock, AlertTriangle, CheckCircle2, CalendarDays, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import {
+  Bell,
+  Clock,
+  AlertTriangle,
+  CheckCircle2,
+  CalendarDays,
+  Loader2,
+  ChevronRight,
+} from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import Link from "next/link";
 
@@ -35,11 +42,11 @@ interface Reminder {
 }
 
 // ─── Helpers ─────────────────────────────────────────
-const PRIORITY_COLORS: Record<string, { bg: string; color: string }> = {
-  urgente: { bg: "#FFF1F2", color: "#E63946" },
-  alta: { bg: "#FFF7ED", color: "#F97316" },
-  media: { bg: "#EFF6FF", color: "#3B82F6" },
-  baja: { bg: "#ECFDF3", color: "#0D9F6E" },
+const PRIORITY_DOT: Record<string, string> = {
+  urgente: "#EF4444",
+  alta: "#F97316",
+  media: "#3B82F6",
+  baja: "#22C55E",
 };
 
 function timeAgo(dateStr: string | null): string {
@@ -51,12 +58,12 @@ function timeAgo(dateStr: string | null): string {
   if (days < 0) {
     const absDays = Math.abs(days);
     if (absDays === 0) return "Hoy";
-    if (absDays === 1) return "Mañana";
-    return `En ${absDays} días`;
+    if (absDays === 1) return "Manana";
+    return `En ${absDays} dias`;
   }
   if (days === 0) return "Hoy";
   if (days === 1) return "Ayer";
-  return `Hace ${days} días`;
+  return `Hace ${days} dias`;
 }
 
 function isToday(dateStr: string | null): boolean {
@@ -86,7 +93,6 @@ export function NotificationBell() {
   const [detailLoaded, setDetailLoaded] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch just the counts (lightweight, runs on mount + polling)
   const fetchMetrics = useCallback(async () => {
     try {
       const res = await fetch("/api/war-room/metrics");
@@ -99,7 +105,6 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Fetch detail items (only when popover opens)
   const fetchDetails = useCallback(async () => {
     setLoading(true);
     try {
@@ -123,37 +128,31 @@ export function NotificationBell() {
     }
   }, []);
 
-  // Mount: fetch metrics + start polling
   useEffect(() => {
     fetchMetrics();
     intervalRef.current = setInterval(fetchMetrics, 60000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [fetchMetrics]);
 
-  // When popover opens, fetch detail items
   useEffect(() => {
     if (open && !detailLoaded) fetchDetails();
   }, [open, detailLoaded, fetchDetails]);
 
-  // When popover closes, mark detail as stale so next open refetches
   const handleOpenChange = (isOpen: boolean) => {
     setOpen(isOpen);
     if (!isOpen) setDetailLoaded(false);
   };
 
-  // Navigate to calendar with deep link
   const navigateToItem = useCallback((type: string, id: string) => {
     setOpen(false);
     router.push(`/calendar?${type}=${id}`);
   }, [router]);
 
-  // Badge count
   const totalCount = metrics
     ? metrics.overdue_count + metrics.tasks_today + metrics.active_reminders
     : 0;
   const hasOverdue = (metrics?.overdue_count || 0) > 0;
 
-  // Classify items
   const overdueTasks = tasks.filter((t) => isOverdue(t.due_date));
   const todayTasks = tasks.filter((t) => isToday(t.due_date));
   const overdueReminders = reminders.filter((r) => isOverdue(r.due_date));
@@ -170,16 +169,21 @@ export function NotificationBell() {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button className="relative p-2.5 rounded-xl hover:bg-slate-100/80 transition-all duration-200 group">
-          <Bell className="h-5 w-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+          <Bell
+            className={`h-5 w-5 transition-colors ${
+              hasOverdue
+                ? "text-red-400 group-hover:text-red-500"
+                : "text-slate-400 group-hover:text-slate-600"
+            }`}
+          />
           {totalCount > 0 && (
             <span
-              className="absolute -top-0.5 -right-0.5 flex items-center justify-center border-2 border-white shadow-sm"
+              className="absolute -top-0.5 -right-0.5 flex items-center justify-center border-2 border-white"
               style={{
-                minWidth: 18, height: 18, padding: "0 4px", borderRadius: 9,
-                fontSize: 10, fontWeight: 700, color: "#fff",
-                background: hasOverdue
-                  ? "linear-gradient(135deg, #E63946, #dc2626)"
-                  : "linear-gradient(135deg, #F97316, #DC8B0B)",
+                minWidth: 19, height: 19, padding: "0 4px", borderRadius: 10,
+                fontSize: 10, fontWeight: 800, color: "#fff",
+                background: hasOverdue ? "#EF4444" : "#F97316",
+                boxShadow: `0 2px 6px ${hasOverdue ? "rgba(239,68,68,0.35)" : "rgba(249,115,22,0.35)"}`,
               }}
             >
               {totalCount > 99 ? "99+" : totalCount}
@@ -191,174 +195,161 @@ export function NotificationBell() {
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="p-0 overflow-hidden"
-        style={{ width: 380, maxHeight: "70vh", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}
+        className="p-0 overflow-hidden border border-slate-200/80"
+        style={{
+          width: 380,
+          maxHeight: "72vh",
+          borderRadius: 14,
+          boxShadow: "0 16px 48px -8px rgba(0,0,0,0.14), 0 4px 12px -2px rgba(0,0,0,0.06)",
+        }}
       >
-        {/* Header */}
-        <div style={{
-          padding: "14px 18px", borderBottom: "1px solid #F0EDE8",
-          background: "linear-gradient(135deg, #fafaf8, #fff)",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Bell style={{ width: 16, height: 16, color: "#0B5394" }} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#18191D", fontFamily: "'DM Sans',sans-serif" }}>
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-white">
+          <div className="flex items-center gap-2.5">
+            <Bell className="h-4 w-4 text-slate-700" />
+            <span className="text-[14px] font-bold text-slate-800 tracking-tight">
               Notificaciones
             </span>
           </div>
           {totalCount > 0 && (
-            <span style={{
-              fontSize: 11, fontWeight: 600, color: "#6B7080", fontFamily: "'DM Sans',sans-serif",
-            }}>
-              {totalCount} pendiente{totalCount !== 1 ? "s" : ""}
-            </span>
+            <div className="flex items-center gap-1.5">
+              {hasOverdue && (
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                  <AlertTriangle className="h-3 w-3" />
+                  {metrics!.overdue_count}
+                </span>
+              )}
+              <span className="text-[11px] font-medium text-slate-400">
+                {totalCount} pendiente{totalCount !== 1 ? "s" : ""}
+              </span>
+            </div>
           )}
         </div>
 
-        {/* Body */}
-        <div style={{ overflowY: "auto", maxHeight: "calc(70vh - 110px)" }}>
+        {/* ── Body ── */}
+        <div className="sidebar-scroll bg-white" style={{ overflowY: "auto", maxHeight: "calc(72vh - 108px)" }}>
           {loading ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 0" }}>
-              <Loader2 className="h-5 w-5 animate-spin" style={{ color: "#0B5394" }} />
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
             </div>
           ) : overdueItems.length === 0 && todayItems.length === 0 && reminderItems.length === 0 ? (
-            <div style={{ padding: "40px 20px", textAlign: "center" }}>
-              <CheckCircle2 style={{ width: 32, height: 32, color: "#0D9F6E", margin: "0 auto 10px" }} />
-              <p style={{ fontSize: 13, fontWeight: 600, color: "#3D4049" }}>Todo al día</p>
-              <p style={{ fontSize: 12, color: "#9CA3B4", marginTop: 2 }}>No hay notificaciones pendientes</p>
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <CheckCircle2 className="h-8 w-8 text-emerald-400 mb-3" />
+              <p className="text-[13px] font-semibold text-slate-600">Todo al dia</p>
+              <p className="text-[12px] text-slate-400 mt-0.5">Sin pendientes</p>
             </div>
           ) : (
             <>
-              {/* Overdue Section */}
               {overdueItems.length > 0 && (
-                <Section
-                  label={`Vencidas (${overdueItems.length})`}
-                  icon={<AlertTriangle style={{ width: 12, height: 12 }} />}
-                  color="#E63946"
-                  bg="#FFF1F2"
+                <NotifGroup
+                  title="Vencidas"
+                  icon={<AlertTriangle className="h-3 w-3 text-red-400" />}
                   items={overdueItems}
                   onItemClick={navigateToItem}
+                  variant="overdue"
                 />
               )}
-
-              {/* Today Section */}
               {todayItems.length > 0 && (
-                <Section
-                  label={`Para Hoy (${todayItems.length})`}
-                  icon={<CalendarDays style={{ width: 12, height: 12 }} />}
-                  color="#3B82F6"
-                  bg="#EFF6FF"
+                <NotifGroup
+                  title="Hoy"
+                  icon={<CalendarDays className="h-3 w-3 text-blue-400" />}
                   items={todayItems}
                   onItemClick={navigateToItem}
+                  variant="today"
                 />
               )}
-
-              {/* Reminders Section */}
               {reminderItems.length > 0 && (
-                <Section
-                  label={`Recordatorios (${reminderItems.length})`}
-                  icon={<Clock style={{ width: 12, height: 12 }} />}
-                  color="#DC8B0B"
-                  bg="#FFF8EB"
+                <NotifGroup
+                  title="Recordatorios"
+                  icon={<Clock className="h-3 w-3 text-amber-500" />}
                   items={reminderItems}
                   onItemClick={navigateToItem}
+                  variant="reminder"
                 />
               )}
             </>
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{ padding: "10px 18px", borderTop: "1px solid #F0EDE8", background: "#FAFAF8" }}>
-          <Link
-            href="/calendar"
-            onClick={() => setOpen(false)}
-            style={{
-              display: "block", textAlign: "center", fontSize: 12, fontWeight: 700,
-              color: "#0B5394", textDecoration: "none", padding: "6px 0",
-              borderRadius: 8, transition: "background 0.15s",
-              fontFamily: "'DM Sans',sans-serif",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#E8F0FE"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-          >
-            Ver todo en War Room
-          </Link>
-        </div>
+        {/* ── Footer ── */}
+        <Link
+          href="/calendar"
+          onClick={() => setOpen(false)}
+          className="group/ft flex items-center justify-center gap-1.5 py-3 border-t border-slate-100 bg-slate-50/60 hover:bg-slate-100/80 transition-colors"
+          style={{ textDecoration: "none" }}
+        >
+          <span className="text-[12px] font-semibold text-slate-500 group-hover/ft:text-slate-700 transition-colors">
+            Ver todo en el Calendario
+          </span>
+          <ChevronRight className="h-3 w-3 text-slate-400 group-hover/ft:text-slate-600 group-hover/ft:translate-x-0.5 transition-all" />
+        </Link>
       </PopoverContent>
     </Popover>
   );
 }
 
-// ─── Section Sub-component ───────────────────────────
-function Section({ label, icon, color, bg, items, onItemClick }: {
-  label: string;
+// ─── Group Sub-component ─────────────────────────────
+function NotifGroup({ title, icon, items, onItemClick, variant }: {
+  title: string;
   icon: React.ReactNode;
-  color: string;
-  bg: string;
   items: Array<{ id: string; title: string; due_date: string | null; priority: string; _type: string; related_client_name?: string }>;
   onItemClick: (type: string, id: string) => void;
+  variant: "overdue" | "today" | "reminder";
 }) {
   return (
     <div>
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6, padding: "8px 18px",
-        background: bg, borderBottom: "1px solid #F0EDE8",
-      }}>
-        <span style={{ color, display: "flex" }}>{icon}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "'DM Sans',sans-serif" }}>
-          {label}
+      {/* Section label */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 px-5 py-2 bg-slate-50/90 backdrop-blur-sm border-b border-slate-100/60">
+        {icon}
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          {title}
+        </span>
+        <span className="text-[10px] font-bold text-slate-300 bg-slate-100 rounded-full px-1.5 py-px">
+          {items.length}
         </span>
       </div>
+
+      {/* Items */}
       {items.map((item) => {
-        const pc = PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.media;
+        const dotColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.media;
+        const isTask = item._type === "task";
+
         return (
           <div
             key={`${item._type}-${item.id}`}
-            style={{
-              padding: "10px 18px", borderBottom: "1px solid #F0EDE8",
-              cursor: "pointer", transition: "background 0.15s",
-            }}
+            className="group/row flex items-center gap-3 px-5 py-3 cursor-pointer border-b border-slate-50 hover:bg-slate-50/80 transition-colors"
             onClick={() => onItemClick(item._type, item.id)}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#FCFBF9"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
           >
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{
-                  fontSize: 13, fontWeight: 600, color: "#18191D", margin: 0,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  fontFamily: "'DM Sans',sans-serif",
-                }}>
-                  {item.title}
-                </p>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                  {item.related_client_name && (
-                    <span style={{ fontSize: 11, color: "#6B7080" }}>{item.related_client_name}</span>
-                  )}
-                  {item.due_date && (
-                    <span style={{ fontSize: 11, color: "#9CA3B4" }}>
-                      {timeAgo(item.due_date)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <span style={{
-                  fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                  background: pc.bg, color: pc.color, textTransform: "uppercase", letterSpacing: "0.5px",
-                }}>
-                  {item.priority}
-                </span>
-                <span style={{
-                  fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
-                  background: item._type === "task" ? "#EFF6FF" : "#FFF8EB",
-                  color: item._type === "task" ? "#3B82F6" : "#DC8B0B",
-                }}>
-                  {item._type === "task" ? "Tarea" : "Recordatorio"}
-                </span>
-              </div>
+            {/* Priority dot */}
+            <span
+              className="w-[7px] h-[7px] rounded-full flex-shrink-0"
+              style={{ background: dotColor }}
+            />
+
+            {/* Text content */}
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-slate-700 truncate leading-tight group-hover/row:text-slate-900 transition-colors">
+                {item.title}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                {[
+                  item.related_client_name,
+                  item.due_date ? timeAgo(item.due_date) : null,
+                ].filter(Boolean).join(" · ")}
+              </p>
             </div>
+
+            {/* Type tag */}
+            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+              isTask
+                ? "text-blue-500 bg-blue-50"
+                : "text-amber-600 bg-amber-50"
+            }`}>
+              {isTask ? "Tarea" : "Recordatorio"}
+            </span>
+
+            {/* Arrow on hover */}
+            <ChevronRight className="h-3.5 w-3.5 text-slate-200 group-hover/row:text-slate-400 flex-shrink-0 transition-colors" />
           </div>
         );
       })}

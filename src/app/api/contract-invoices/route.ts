@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/contract-invoices
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     // Get profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get("date_from") || "";
     const dateTo = searchParams.get("date_to") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "20", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("pageSize") || "20", 10), 200);
 
     const toList = (val: string) => val.split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -57,8 +58,9 @@ export async function GET(request: NextRequest) {
 
     // Search filter across multiple columns
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `customer_name.ilike.%${search}%,china_invoice_number.ilike.%${search}%,customer_contract.ilike.%${search}%,notes.ilike.%${search}%`
+        `customer_name.ilike.%${s}%,china_invoice_number.ilike.%${s}%,customer_contract.ilike.%${s}%,notes.ilike.%${s}%`
       );
     }
 
@@ -139,7 +141,7 @@ export async function POST(request: NextRequest) {
     // Get profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -147,6 +149,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Perfil no encontrado" },
         { status: 404 }
+      );
+    }
+
+    // Role check: comercial users cannot create contract invoices
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
       );
     }
 
@@ -243,7 +253,7 @@ export async function PATCH(request: NextRequest) {
     // Get profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -251,6 +261,14 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json(
         { error: "Perfil no encontrado" },
         { status: 404 }
+      );
+    }
+
+    // Role check: comercial users cannot update contract invoices
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
       );
     }
 

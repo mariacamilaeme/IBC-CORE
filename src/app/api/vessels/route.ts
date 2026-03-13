@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/vessels
@@ -35,12 +36,13 @@ export async function GET(request: NextRequest) {
 
     // Apply search filter
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `vessel_name.ilike.%${search}%,shipping_line.ilike.%${search}%,imo_number.ilike.%${search}%`
+        `vessel_name.ilike.%${s}%,shipping_line.ilike.%${s}%,imo_number.ilike.%${s}%`
       );
     }
 
-    const { data: vessels, error: queryError } = await query;
+    const { data: vessels, error: queryError } = await query.limit(500);
 
     if (queryError) {
       console.error("Error fetching vessels:", queryError);
@@ -50,7 +52,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ data: vessels });
+    const res = NextResponse.json({ data: vessels });
+    res.headers.set("Cache-Control", "private, max-age=60");
+    return res;
   } catch (error) {
     console.error("Unexpected error in GET /api/vessels:", error);
     return NextResponse.json(
@@ -85,13 +89,21 @@ export async function POST(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json(
         { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: comercial users cannot create vessels
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
         { status: 403 }
       );
     }
@@ -189,13 +201,21 @@ export async function PATCH(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json(
         { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: comercial users cannot update vessels
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
         { status: 403 }
       );
     }

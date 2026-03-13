@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
 import { NotificationBell } from "@/components/layout/notification-bell";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
@@ -68,6 +68,9 @@ export function Header() {
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2.5 p-1.5 rounded-xl hover:bg-slate-100/80 transition-all duration-200">
               <Avatar className="h-8 w-8 ring-2 ring-slate-100">
+                {profile?.avatar_url && (
+                  <AvatarImage src={profile.avatar_url} alt={profile.full_name} className="object-cover" />
+                )}
                 <AvatarFallback className="bg-gradient-to-br from-[#1E3A5F] to-blue-600 text-white text-xs font-bold">
                   {initials}
                 </AvatarFallback>

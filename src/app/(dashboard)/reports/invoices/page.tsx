@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { Download, Loader2, Receipt, RefreshCw } from "lucide-react";
+import { Download, Loader2, Receipt, RefreshCw, FileDown } from "lucide-react";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -83,6 +85,7 @@ export default function InvoicesReportPage() {
       });
 
       const NAVY = "1E3A5F"; const WHITE = "FFFFFF"; const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       ws.columns = [
         { key: "invoice_date", width: 13 }, { key: "customer_name", width: 28 },
@@ -99,19 +102,19 @@ export default function InvoicesReportPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: WHITE } } },
-        { text: `          FACTURAS CHINA`, font: { name: "Aptos", size: 10, bold: true, color: { argb: WHITE } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "FACTURAS CHINA", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${chinaInvoices.length} facturas`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2
       const r2 = ws.addRow([""]); ws.mergeCells(2, 1, 2, totalCols); r2.height = 5;
@@ -194,6 +197,7 @@ export default function InvoicesReportPage() {
       });
 
       const NAVY = "1E3A5F"; const WHITE = "FFFFFF"; const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       ws.columns = [
         { key: "invoice_number", width: 18 }, { key: "client_name", width: 26 },
@@ -212,19 +216,19 @@ export default function InvoicesReportPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: WHITE } } },
-        { text: `          FACTURACIÓN COMERCIAL`, font: { name: "Aptos", size: 10, bold: true, color: { argb: WHITE } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "FACTURACIÓN COMERCIAL", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${commInvoices.length} facturas`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2
       const r2 = ws.addRow([""]); ws.mergeCells(2, 1, 2, totalCols); r2.height = 5;
@@ -291,6 +295,81 @@ export default function InvoicesReportPage() {
   };
 
   // ---------------------------------------------------------------------------
+  // PDF Export
+  // ---------------------------------------------------------------------------
+
+  const handlePDF = async () => {
+    try {
+      toast.info("Generando PDF...");
+      if (activeTab === "china") {
+        await generatePDFReport({
+          title: "FACTURAS CHINA",
+          subtitle: "Facturas de proveedores China",
+          filename: "Facturas_China_IBC",
+          recordLabel: "facturas",
+          orientation: "landscape",
+          columns: [
+            { header: "FECHA", dataKey: "fecha", width: 0.8, halign: "center" },
+            { header: "CLIENTE", dataKey: "cliente", width: 1.5, bold: true },
+            { header: "# FACTURA CHINA", dataKey: "num_china", width: 1.2, bold: true, color: "#1E3A5F" },
+            { header: "VALOR CHINA", dataKey: "valor_china", width: 1, halign: "right" },
+            { header: "FACTURA CLIENTE", dataKey: "fact_cliente", width: 1.2 },
+            { header: "VALOR CLIENTE", dataKey: "valor_cliente", width: 1, halign: "right" },
+            { header: "ESTADO", dataKey: "estado", width: 0.8, halign: "center" },
+            { header: "NOTAS", dataKey: "notas", width: 1.5 },
+          ],
+          data: chinaInvoices.map((c) => ({
+            fecha: fmtDate(c.invoice_date),
+            cliente: c.customer_name || "",
+            num_china: c.china_invoice_number || "",
+            valor_china: fmtNum(c.china_invoice_value),
+            fact_cliente: c.customer_contract || "",
+            valor_cliente: fmtNum(c.customer_invoice_value),
+            estado: c.approved ? "Aprobada" : "Pendiente",
+            notas: c.notes || "",
+          })),
+        });
+      } else {
+        await generatePDFReport({
+          title: "FACTURACIÓN COMERCIAL",
+          subtitle: "Facturas comerciales",
+          filename: "Facturacion_IBC",
+          recordLabel: "facturas",
+          orientation: "landscape",
+          columns: [
+            { header: "Nº FACTURA", dataKey: "num", width: 1, bold: true, color: "#1E3A5F" },
+            { header: "CLIENTE", dataKey: "cliente", width: 1.5, bold: true },
+            { header: "COMERCIAL", dataKey: "comercial", width: 1 },
+            { header: "EMISIÓN", dataKey: "emision", width: 0.8, halign: "center" },
+            { header: "VENCIMIENTO", dataKey: "vencimiento", width: 0.8, halign: "center" },
+            { header: "MONEDA", dataKey: "moneda", width: 0.5, halign: "center" },
+            { header: "SUBTOTAL", dataKey: "subtotal", width: 0.9, halign: "right" },
+            { header: "IVA", dataKey: "iva", width: 0.7, halign: "right" },
+            { header: "TOTAL", dataKey: "total", width: 1, halign: "right", bold: true },
+            { header: "ESTADO", dataKey: "estado", width: 0.8, halign: "center" },
+          ],
+          data: commInvoices.map((inv) => ({
+            num: inv.invoice_number || "",
+            cliente: inv.client?.company_name || "",
+            comercial: inv.commercial?.full_name || "",
+            emision: fmtDate(inv.issue_date),
+            vencimiento: fmtDate(inv.due_date),
+            moneda: inv.currency || "USD",
+            subtotal: fmtNum(inv.subtotal),
+            iva: fmtNum(inv.tax_amount),
+            total: fmtNum(inv.total_amount),
+            estado: PAYMENT_STATUS_LABELS[inv.payment_status || "pendiente"] || inv.payment_status || "",
+          })),
+        });
+      }
+      toast.success("PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el PDF");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -313,6 +392,9 @@ export default function InvoicesReportPage() {
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl border-slate-200" onClick={fetchData}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </Button>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50" variant="outline" onClick={handlePDF}>
+            <FileDown className="w-3.5 h-3.5" /> Export PDF
           </Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25" onClick={activeTab === "china" ? handleChinaExport : handleCommExport}>
             <Download className="w-3.5 h-3.5" /> Export Excel

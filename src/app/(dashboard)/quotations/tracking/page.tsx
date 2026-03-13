@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { toast } from "sonner";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import {
   Plus,
   Search,
@@ -207,6 +209,7 @@ export default function TrackingPage() {
 
   // -- Search & filters
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCommercial, setFilterCommercial] = useState<string>("all");
@@ -288,8 +291,8 @@ export default function TrackingPage() {
     if (filterCommercial !== "all") {
       result = result.filter((r) => r.requestedBy === filterCommercial);
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       result = result.filter(
         (r) =>
           r.customer.toLowerCase().includes(q) ||
@@ -301,7 +304,7 @@ export default function TrackingPage() {
     }
 
     return result;
-  }, [data, activeTab, filterStatus, filterCategory, filterCommercial, searchQuery]);
+  }, [data, activeTab, filterStatus, filterCategory, filterCommercial, debouncedSearch]);
 
   // Sorted data
   const sorted = useMemo(() => {
@@ -390,6 +393,7 @@ export default function TrackingPage() {
     const WHITE = "FFFFFF";
     const INK = "1E293B";
     const INK_MUTED = "64748B";
+    const logoId = await addLogoToWorkbook(wb);
 
     // Status color map for Excel (ARGB without #)
     const statusColors: Record<string, { font: string; fill: string }> = {
@@ -423,19 +427,19 @@ export default function TrackingPage() {
     const bannerCell = ws.getCell("A1");
     const dateStr = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
     bannerCell.value = { richText: [
-      { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-      { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: "FFFFFF" } } },
-      { text: `          REPORTE DE COTIZACIONES`, font: { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } } },
+      { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+      { text: "REPORTE DE COTIZACIONES", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
       { text: `     ${dateStr}  ·  ${rows.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
     ] };
     bannerCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-    bannerCell.alignment = { vertical: "middle", horizontal: "left", indent: 2 };
-    ws.getRow(1).height = 40;
+    bannerCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+    ws.getRow(1).height = 52;
     for (let col = 1; col <= columns.length; col++) {
       const cell = ws.getRow(1).getCell(col);
       if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
       cell.border = { bottom: { style: "medium", color: { argb: "FFFFFF" } } };
     }
+    addLogoToHeader(ws, logoId, columns.length);
 
     // ── Row 2: Spacer ──
     ws.mergeCells(2, 1, 2, columns.length);

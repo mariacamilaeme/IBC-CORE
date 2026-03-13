@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/quotations
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
     // Get user profile to determine role
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get("date_from") || "";
     const dateTo = searchParams.get("date_to") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("page_size") || "100", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("page_size") || "100", 10), 200);
 
     // Build query with joins
     let query = supabase
@@ -113,8 +114,9 @@ export async function GET(request: NextRequest) {
 
     // Text search across quotation_number, material, and client company_name
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `quotation_number.ilike.%${search}%,material.ilike.%${search}%`
+        `quotation_number.ilike.%${s}%,material.ilike.%${s}%`
       );
     }
 
@@ -128,7 +130,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error("Error fetching quotations:", error);
       return NextResponse.json(
-        { error: "Error al obtener cotizaciones", details: error.message },
+        { error: "Error al obtener cotizaciones" },
         { status: 500 }
       );
     }
@@ -177,7 +179,7 @@ export async function POST(request: NextRequest) {
     // Get user profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -224,6 +226,20 @@ export async function POST(request: NextRequest) {
     const prefix = config.quotation_prefix || "COT";
     const nextNumber = config.quotation_next_number || 1;
     const quotationNumber = `${prefix}-${String(nextNumber).padStart(5, "0")}`;
+
+    // Atomically increment: only succeeds if no one else changed it (optimistic lock)
+    const { error: incrementError } = await serviceClient
+      .from("system_config")
+      .update({ quotation_next_number: nextNumber + 1 })
+      .eq("id", config.id)
+      .eq("quotation_next_number", nextNumber);
+
+    if (incrementError) {
+      return NextResponse.json(
+        { error: "Error de concurrencia al generar número de cotización. Intente de nuevo." },
+        { status: 409 }
+      );
+    }
 
     // Calculate expiration date if validity_days is provided
     let expirationDate: string | null = null;
@@ -321,16 +337,10 @@ export async function POST(request: NextRequest) {
     if (insertError) {
       console.error("Error inserting quotation:", insertError);
       return NextResponse.json(
-        { error: "Error al crear la cotizacion", details: insertError.message },
+        { error: "Error al crear la cotizacion" },
         { status: 500 }
       );
     }
-
-    // Increment next_number in system_config (use service client)
-    await serviceClient
-      .from("system_config")
-      .update({ quotation_next_number: nextNumber + 1 })
-      .eq("id", config.id || "");
 
     // Insert audit log
     await supabase.from("audit_logs").insert({
@@ -380,7 +390,7 @@ export async function PATCH(request: NextRequest) {
     // Get user profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -412,6 +422,11 @@ export async function PATCH(request: NextRequest) {
         { error: "Cotizacion no encontrada" },
         { status: 404 }
       );
+    }
+
+    // Comercial can only edit their own quotations
+    if (profile.role === "comercial" && currentQuotation.commercial_id !== user.id) {
+      return NextResponse.json({ error: "No tiene permisos para editar esta cotización" }, { status: 403 });
     }
 
     // Build update data
@@ -563,7 +578,7 @@ export async function PATCH(request: NextRequest) {
     if (updateError) {
       console.error("Error updating quotation:", updateError);
       return NextResponse.json(
-        { error: "Error al actualizar la cotizacion", details: updateError.message },
+        { error: "Error al actualizar la cotizacion" },
         { status: 500 }
       );
     }

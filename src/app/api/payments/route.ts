@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/payments
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status") || "";
     const search = searchParams.get("search") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "100", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("pageSize") || "100", 10), 200);
     const sortField = searchParams.get("sort_field") || "created_at";
     const sortDirection = searchParams.get("sort_direction") || "desc";
 
@@ -75,8 +76,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `client.ilike.%${search}%,description.ilike.%${search}%,china_sales_contract.ilike.%${search}%,remarks.ilike.%${search}%`
+        `client.ilike.%${s}%,description.ilike.%${s}%,china_sales_contract.ilike.%${s}%,remarks.ilike.%${s}%`
       );
     }
 
@@ -122,12 +124,20 @@ export async function POST(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json({ error: "Perfil de usuario no encontrado" }, { status: 403 });
+    }
+
+    // Role check: comercial users cannot create payments
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();
@@ -207,12 +217,20 @@ export async function PATCH(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json({ error: "Perfil de usuario no encontrado" }, { status: 403 });
+    }
+
+    // Role check: comercial users cannot update payments
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
+      );
     }
 
     const body = await request.json();
@@ -300,12 +318,20 @@ export async function DELETE(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json({ error: "Perfil de usuario no encontrado" }, { status: 403 });
+    }
+
+    // Role check: only admin and directora can delete payments
+    if (profile.role !== "admin" && profile.role !== "directora") {
+      return NextResponse.json(
+        { error: "No tiene permisos para eliminar pagos" },
+        { status: 403 }
+      );
     }
 
     const { searchParams } = new URL(request.url);
@@ -327,7 +353,7 @@ export async function DELETE(request: NextRequest) {
 
     const { error: deleteError } = await supabase
       .from("payments")
-      .delete()
+      .update({ is_active: false, updated_by: user.id })
       .eq("id", id);
 
     if (deleteError) {

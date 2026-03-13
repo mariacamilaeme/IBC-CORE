@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 import type {
   Invoice,
   InsertInvoice,
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     // Get profile to check role
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -73,8 +74,9 @@ export async function GET(request: NextRequest) {
 
     // Search filter - search by invoice_number or client company_name
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `invoice_number.ilike.%${search}%,client.company_name.ilike.%${search}%`
+        `invoice_number.ilike.%${s}%,client.company_name.ilike.%${s}%`
       );
     }
 
@@ -101,7 +103,7 @@ export async function GET(request: NextRequest) {
       query = query.lte("issue_date", dateTo);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await query.limit(500);
 
     if (error) {
       console.error("Error fetching invoices:", error);
@@ -145,7 +147,7 @@ export async function POST(request: NextRequest) {
     // Get profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -176,10 +178,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Auto-generate invoice number from system_config
+    // Auto-generate invoice number from system_config (atomic read-and-increment)
     const { data: config, error: configError } = await serviceSupabase
       .from("system_config")
-      .select("invoice_prefix, invoice_next_number")
+      .select("id, invoice_prefix, invoice_next_number")
       .limit(1)
       .single();
 
@@ -193,6 +195,20 @@ export async function POST(request: NextRequest) {
     const prefix = config.invoice_prefix || "FAC";
     const nextNumber = config.invoice_next_number || 1;
     const invoiceNumber = `${prefix}-${String(nextNumber).padStart(5, "0")}`;
+
+    // Atomically increment: only succeeds if no one else changed it (optimistic lock)
+    const { error: incrementError } = await serviceSupabase
+      .from("system_config")
+      .update({ invoice_next_number: nextNumber + 1 })
+      .eq("id", config.id)
+      .eq("invoice_next_number", nextNumber);
+
+    if (incrementError) {
+      return NextResponse.json(
+        { error: "Error de concurrencia al generar número de factura. Intente de nuevo." },
+        { status: 409 }
+      );
+    }
 
     // Calculate tax_amount if not provided
     let taxAmount = body.tax_amount;
@@ -263,19 +279,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Increment the next number in system_config
-    await serviceSupabase
-      .from("system_config")
-      .update({ invoice_next_number: nextNumber + 1 })
-      .eq("id", config.invoice_prefix ? (config as Record<string, unknown>).id || undefined : undefined)
-      .single();
-
-    // Fallback: update using a broader match if the above doesn't work
-    await serviceSupabase
-      .from("system_config")
-      .update({ invoice_next_number: nextNumber + 1 })
-      .not("id", "is", null);
-
     // Insert audit log
     const auditLog: InsertAuditLog = {
       user_id: user.id,
@@ -324,7 +327,7 @@ export async function PATCH(request: NextRequest) {
     // Get profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -365,11 +368,45 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Build update object
-    const updateData: Record<string, unknown> = {
-      ...body,
-      updated_by: user.id,
-    };
+    // Build update object using whitelist (prevent mass assignment)
+    const allowedFields = [
+      "client_id",
+      "commercial_id",
+      "quotation_id",
+      "issue_date",
+      "due_date",
+      "currency",
+      "exchange_rate",
+      "subtotal",
+      "tax_percentage",
+      "tax_amount",
+      "total_amount",
+      "total_amount_cop",
+      "payment_status",
+      "payment_method",
+      "payment_date",
+      "payment_reference",
+      "partial_payments",
+      "items",
+      "incoterm",
+      "port_of_origin",
+      "port_of_destination",
+      "vessel_id",
+      "shipping_id",
+      "payment_conditions",
+      "bank_details",
+      "document_url",
+      "notes",
+      "status_history",
+      "new_partial_payment",
+      "status_change_notes",
+    ];
+    const updateData: Record<string, unknown> = { updated_by: user.id };
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = body[field];
+      }
+    }
 
     // If payment_status changed, append to status_history
     if (

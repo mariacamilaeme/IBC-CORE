@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/war-room/tasks
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).single();
     if (profileError || !profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 403 });
 
     const { searchParams } = new URL(request.url);
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
       query = query.eq("assigned_to", user.id);
     }
 
-    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,related_client_name.ilike.%${search}%`);
+    if (search) { const s = sanitizePostgrestValue(search); query = query.or(`title.ilike.%${s}%,description.ilike.%${s}%,related_client_name.ilike.%${s}%`); }
     if (priority) query = query.eq("priority", priority);
     if (category) query = query.eq("category", category);
     if (completed === "true") query = query.eq("is_completed", true);
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     if (dateFrom) query = query.gte("due_date", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("due_date", `${dateTo}T23:59:59`);
 
-    const { data: tasks, error: queryError } = await query;
+    const { data: tasks, error: queryError } = await query.limit(500);
     if (queryError) {
       console.error("Error fetching tasks:", queryError);
       return NextResponse.json({ error: "Error al obtener las tareas" }, { status: 500 });
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).single();
     if (profileError || !profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 403 });
 
     const body = await request.json();
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.error("Error inserting task:", insertError);
-      return NextResponse.json({ error: insertError.message || "Error al crear la tarea" }, { status: 500 });
+      return NextResponse.json({ error: "Error al crear la tarea" }, { status: 500 });
     }
 
     // Fetch with profile join
@@ -137,7 +138,7 @@ export async function PATCH(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).single();
     if (profileError || !profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 403 });
 
     const body = await request.json();
@@ -145,6 +146,11 @@ export async function PATCH(request: NextRequest) {
 
     const { data: existing, error: fetchError } = await supabase.from("war_room_tasks").select("*").eq("id", body.id).single();
     if (fetchError || !existing) return NextResponse.json({ error: "Tarea no encontrada" }, { status: 404 });
+
+    // Comercial/analista can only edit their own assigned tasks
+    if ((profile.role === "comercial" || profile.role === "analista") && existing.assigned_to !== user.id && existing.created_by !== user.id) {
+      return NextResponse.json({ error: "No tiene permisos para editar esta tarea" }, { status: 403 });
+    }
 
     const updateData: Record<string, unknown> = { updated_by: user.id };
     const allowedFields = ["title", "description", "priority", "category", "due_date", "is_completed", "assigned_to", "related_contract_id", "related_client_name", "recurrence", "sort_order", "is_active"];
@@ -170,7 +176,7 @@ export async function PATCH(request: NextRequest) {
 
     if (updateError) {
       console.error("Error updating task:", updateError);
-      return NextResponse.json({ error: updateError.message || "Error al actualizar la tarea" }, { status: 500 });
+      return NextResponse.json({ error: "Error al actualizar la tarea" }, { status: 500 });
     }
 
     // Fetch with profile join

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/shipments
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     // Get user profile to check role
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -66,8 +67,9 @@ export async function GET(request: NextRequest) {
 
     // Apply optional filters
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `shipment_number.ilike.%${search}%,bl_number.ilike.%${search}%,booking_number.ilike.%${search}%,port_of_loading.ilike.%${search}%,port_of_discharge.ilike.%${search}%,cargo_description.ilike.%${search}%`
+        `shipment_number.ilike.%${s}%,bl_number.ilike.%${s}%,booking_number.ilike.%${s}%,port_of_loading.ilike.%${s}%,port_of_discharge.ilike.%${s}%,cargo_description.ilike.%${s}%`
       );
     }
 
@@ -91,7 +93,7 @@ export async function GET(request: NextRequest) {
       query = query.lte("created_at", `${dateTo}T23:59:59`);
     }
 
-    const { data: shipments, error: queryError } = await query;
+    const { data: shipments, error: queryError } = await query.limit(500);
 
     if (queryError) {
       console.error("Error fetching shipments:", queryError);
@@ -138,7 +140,7 @@ export async function POST(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -147,6 +149,11 @@ export async function POST(request: NextRequest) {
         { error: "Perfil de usuario no encontrado" },
         { status: 403 }
       );
+    }
+
+    // Comercial users cannot create shipments
+    if (profile.role === "comercial") {
+      return NextResponse.json({ error: "No tiene permisos para crear embarques" }, { status: 403 });
     }
 
     // Parse request body
@@ -190,6 +197,20 @@ export async function POST(request: NextRequest) {
     const prefix = config.shipment_prefix || "EMB";
     const nextNumber = config.shipment_next_number || 1;
     const shipmentNumber = `${prefix}-${String(nextNumber).padStart(5, "0")}`;
+
+    // Atomically increment: only succeeds if no one else changed it (optimistic lock)
+    const { error: incrementError } = await serviceClient
+      .from("system_config")
+      .update({ shipment_next_number: nextNumber + 1 })
+      .eq("id", config.id)
+      .eq("shipment_next_number", nextNumber);
+
+    if (incrementError) {
+      return NextResponse.json(
+        { error: "Error de concurrencia al generar número de embarque. Intente de nuevo." },
+        { status: 409 }
+      );
+    }
 
     // Set initial status and status_history
     const initialStatus = body.status || "reservado";
@@ -261,11 +282,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Increment the shipment_next_number in system_config
-    await serviceClient
-      .from("system_config")
-      .update({ shipment_next_number: nextNumber + 1 })
-      .eq("id", config.id);
+    // Number was already incremented atomically before insert
 
     // Insert audit log entry
     const auditEntry = {
@@ -323,7 +340,7 @@ export async function PATCH(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -356,6 +373,11 @@ export async function PATCH(request: NextRequest) {
         { error: "Embarque no encontrado" },
         { status: 404 }
       );
+    }
+
+    // Comercial can only edit their own shipments
+    if (profile.role === "comercial" && existingShipment.commercial_id !== user.id) {
+      return NextResponse.json({ error: "No tiene permisos para editar este embarque" }, { status: 403 });
     }
 
     // Build update data (only include provided fields)

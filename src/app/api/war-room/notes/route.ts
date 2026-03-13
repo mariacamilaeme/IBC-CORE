@@ -10,7 +10,7 @@ export async function GET() {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+    const { data: profile, error: profileError } = await supabase.from("profiles").select("role, full_name").eq("id", user.id).single();
     if (profileError || !profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 403 });
 
     let query = supabase
@@ -25,7 +25,7 @@ export async function GET() {
       query = query.eq("created_by", user.id);
     }
 
-    const { data: notes, error: queryError } = await query;
+    const { data: notes, error: queryError } = await query.limit(200);
     if (queryError) {
       console.error("Error fetching notes:", queryError);
       return NextResponse.json({ error: "Error al obtener las notas" }, { status: 500 });
@@ -90,8 +90,23 @@ export async function PATCH(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+
     const body = await request.json();
     if (!body.id) return NextResponse.json({ error: "El ID es obligatorio" }, { status: 400 });
+
+    // Ownership check: non-admin users can only update their own notes
+    if (profile?.role !== "admin" && profile?.role !== "directora") {
+      const { data: existingNote } = await supabase
+        .from("war_room_notes")
+        .select("created_by")
+        .eq("id", body.id)
+        .single();
+
+      if (existingNote?.created_by !== user.id) {
+        return NextResponse.json({ error: "No tiene permisos para editar esta nota" }, { status: 403 });
+      }
+    }
 
     const updateData: Record<string, unknown> = { updated_by: user.id };
     const allowedFields = ["content", "color", "pinned", "linked_date", "is_active"];

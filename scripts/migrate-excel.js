@@ -6,7 +6,7 @@
  * Output: scripts/output_contracts.sql and scripts/output_invoices.sql
  */
 
-const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 const fs = require("fs");
 const path = require("path");
 
@@ -95,13 +95,24 @@ function normalizeProductType(val) {
 
 // ─── Main ───────────────────────────────────────────────────────────
 
+// Helper: convert ExcelJS worksheet to array-of-arrays
+function sheetToRows(ws) {
+  const rows = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    rows.push(row.values.slice(1));
+  });
+  return rows;
+}
+
+async function runMigration() {
 console.log("Reading Excel file:", EXCEL_PATH);
-const wb = XLSX.readFile(EXCEL_PATH);
+const wb = new ExcelJS.Workbook();
+await wb.xlsx.readFile(EXCEL_PATH);
 
 // ─── STATUS → contracts ─────────────────────────────────────────────
 
-const wsStatus = wb.Sheets["STATUS"];
-const statusData = XLSX.utils.sheet_to_json(wsStatus, { header: 1 });
+const wsStatus = wb.getWorksheet("STATUS");
+const statusData = sheetToRows(wsStatus);
 
 let contractsSql = "-- Migration: contracts from STATUS sheet\n";
 contractsSql += "-- Generated: " + new Date().toISOString() + "\n\n";
@@ -207,8 +218,8 @@ console.log(`Contracts: ${contractCount} rows → ${OUT_CONTRACTS}`);
 
 // ─── FACTURAS → contract_invoices ───────────────────────────────────
 
-const wsFact = wb.Sheets["FACTURAS"];
-const factData = XLSX.utils.sheet_to_json(wsFact, { header: 1 });
+const wsFact = wb.getWorksheet("FACTURAS");
+const factData = sheetToRows(wsFact);
 
 let invoicesSql = "-- Migration: contract_invoices from FACTURAS sheet\n";
 invoicesSql += "-- Generated: " + new Date().toISOString() + "\n\n";
@@ -258,3 +269,6 @@ flushIBatch();
 fs.writeFileSync(OUT_INVOICES, invoicesSql, "utf-8");
 console.log(`Invoices: ${invoiceCount} rows → ${OUT_INVOICES}`);
 console.log("\nDone! Now paste the contents of each file into the Supabase SQL Editor.");
+}
+
+runMigration().catch(console.error);

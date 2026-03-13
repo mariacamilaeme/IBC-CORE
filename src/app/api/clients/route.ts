@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/clients
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "20", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("pageSize") || "20", 10), 200);
     const sortField = searchParams.get("sort_field") || "company_name";
     const sortDirection = searchParams.get("sort_direction") || "asc";
 
@@ -72,8 +73,9 @@ export async function GET(request: NextRequest) {
 
     // Search
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `company_name.ilike.%${search}%,contact_name.ilike.%${search}%,email.ilike.%${search}%,trade_name.ilike.%${search}%,phone.ilike.%${search}%`
+        `company_name.ilike.%${s}%,contact_name.ilike.%${s}%,email.ilike.%${s}%,trade_name.ilike.%${s}%,phone.ilike.%${s}%`
       );
     }
 
@@ -149,12 +151,17 @@ export async function POST(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json({ error: "Perfil de usuario no encontrado" }, { status: 403 });
+    }
+
+    // Comercial users cannot create clients
+    if (profile.role === "comercial") {
+      return NextResponse.json({ error: "No tiene permisos para crear clientes" }, { status: 403 });
     }
 
     const body = await request.json();
@@ -246,7 +253,7 @@ export async function PATCH(request: NextRequest) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -269,6 +276,11 @@ export async function PATCH(request: NextRequest) {
 
     if (fetchError || !existingClient) {
       return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
+    }
+
+    // Comercial can only edit their own assigned clients
+    if (profile.role === "comercial" && existingClient.assigned_commercial_id !== user.id) {
+      return NextResponse.json({ error: "No tiene permisos para editar este cliente" }, { status: 403 });
     }
 
     const allowedFields = [

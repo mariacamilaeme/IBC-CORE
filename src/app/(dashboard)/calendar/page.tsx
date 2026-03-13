@@ -17,12 +17,14 @@ import type {
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import WarRoomGreeting from "@/components/war-room/war-room-greeting";
-import WarRoomKpiStrip from "@/components/war-room/war-room-kpi-strip";
+import dynamic from "next/dynamic";
 import WarRoomCalendar from "@/components/war-room/war-room-calendar";
 import WarRoomTaskList from "@/components/war-room/war-room-task-list";
 import WarRoomReminderPanel from "@/components/war-room/war-room-reminder-panel";
 import WarRoomNotesPanel from "@/components/war-room/war-room-notes-panel";
-import WarRoomMetricsBar from "@/components/war-room/war-room-metrics-bar";
+
+const WarRoomKpiStrip = dynamic(() => import("@/components/war-room/war-room-kpi-strip"), { ssr: false });
+const WarRoomMetricsBar = dynamic(() => import("@/components/war-room/war-room-metrics-bar"), { ssr: false });
 import WarRoomTaskDetail from "@/components/war-room/war-room-task-detail";
 import WarRoomKpiDrawer from "@/components/war-room/war-room-kpi-drawer";
 import type { KpiDrawerType } from "@/components/war-room/war-room-kpi-drawer";

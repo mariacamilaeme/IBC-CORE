@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizePostgrestValue } from "@/lib/utils";
 
 // =====================================================
 // GET /api/contracts
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
     // Get user profile to check role
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
     const productType = searchParams.get("product_type") || "";
     const commercialName = searchParams.get("commercial_name") || "";
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "20", 10);
+    const pageSize = Math.min(parseInt(searchParams.get("pageSize") || "20", 10), 200);
     const sortField = searchParams.get("sort_field") || "contract_date";
     const sortDirection = searchParams.get("sort_direction") || "desc";
 
@@ -79,8 +80,9 @@ export async function GET(request: NextRequest) {
 
     // Apply optional filters
     if (search) {
+      const s = sanitizePostgrestValue(search);
       query = query.or(
-        `commercial_name.ilike.%${search}%,client_name.ilike.%${search}%,china_contract.ilike.%${search}%,client_contract.ilike.%${search}%,detail.ilike.%${search}%,vessel_name.ilike.%${search}%,bl_number.ilike.%${search}%`
+        `commercial_name.ilike.%${s}%,client_name.ilike.%${s}%,china_contract.ilike.%${s}%,client_contract.ilike.%${s}%,detail.ilike.%${s}%,vessel_name.ilike.%${s}%,bl_number.ilike.%${s}%`
       );
     }
 
@@ -278,13 +280,21 @@ export async function POST(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json(
         { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: comercial users cannot create contracts
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
         { status: 403 }
       );
     }
@@ -423,13 +433,21 @@ export async function PATCH(request: NextRequest) {
     // Get user profile for audit log
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
     if (profileError || !profile) {
       return NextResponse.json(
         { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: comercial users cannot update contracts
+    if (profile.role === "comercial") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
         { status: 403 }
       );
     }
@@ -643,6 +661,28 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json(
         { error: "No autorizado" },
         { status: 401 }
+      );
+    }
+
+    // Get user profile to check role
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, full_name")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json(
+        { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: only admin and directora can perform bulk operations
+    if (profile.role !== "admin" && profile.role !== "directora") {
+      return NextResponse.json(
+        { error: "No tiene permisos para realizar esta acción" },
+        { status: 403 }
       );
     }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import {
   Plus,
   Search,
@@ -93,42 +94,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import Link from "next/link";
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceHover: "#FCFBF9",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkSoft: "#3D4049",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  inkGhost: "#C5CAD5",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  accentDark: "#083D6E",
-  success: "#0D9F6E",
-  successBg: "#ECFDF3",
-  warning: "#DC8B0B",
-  warningBg: "#FFF8EB",
-  danger: "#E63946",
-  dangerBg: "#FFF1F2",
-  blue: "#3B82F6",
-  blueBg: "#EFF6FF",
-  violet: "#7C5CFC",
-  violetBg: "#F3F0FF",
-  teal: "#0EA5A5",
-  tealBg: "#EDFCFC",
-  orange: "#F97316",
-  orangeBg: "#FFF7ED",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowMd: "0 2px 4px rgba(26,29,35,0.04), 0 8px 20px rgba(26,29,35,0.05)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px",
-  radiusMd: "14px",
-  radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -174,6 +140,7 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
     const start = animRef.current;
     const diff = value - start;
     if (diff === 0) return;
+    let rafId: number;
     const duration = 1200;
     const startTime = performance.now();
     const step = (now: number) => {
@@ -182,10 +149,11 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
       const eased = 1 - Math.pow(1 - progress, 4);
       const current = Math.round(start + diff * eased);
       setDisplay(current);
-      if (progress < 1) requestAnimationFrame(step);
+      if (progress < 1) rafId = requestAnimationFrame(step);
       else animRef.current = value;
     };
-    requestAnimationFrame(step);
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
   }, [value]);
 
   return <>{prefix}{display.toLocaleString("es-CO")}{suffix}</>;
@@ -972,6 +940,7 @@ export default function ClientsPage() {
       const BORDER_LIGHT = "D0D5DD";
       const TEXT_DARK = "1A202C";
       const TEXT_MUTED = "6B7280";
+      const logoId = await addLogoToWorkbook(workbook);
 
       // Client type colors
       const typeStyles: Record<string, { bg: string; text: string }> = {
@@ -1018,20 +987,20 @@ export default function ClientsPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: "FFFFFF" } } },
-        { text: `          REPORTE DE CLIENTES`, font: { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "REPORTE DE CLIENTES", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${exportData.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
         ...(filterDesc.length > 0 ? [{ text: `     ${filterDesc.join(" · ")}`, font: { name: "Aptos", size: 8, italic: true, color: { argb: "A8BED4" } } }] : []),
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: "FFFFFF" } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2: Spacer
       const r2x = ws.addRow([""]);

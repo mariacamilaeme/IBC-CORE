@@ -6,8 +6,9 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarState } from "@/hooks/useSidebar";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   LayoutDashboard,
@@ -24,38 +25,44 @@ import {
   BarChart3,
   Calendar,
   CreditCard,
+  BookOpen,
 } from "lucide-react";
+
+import type { ModuleName } from "@/types";
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
-  roles?: string[];
+  module?: ModuleName;
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Contratos", href: "/contracts", icon: ClipboardList },
-  { label: "Clientes", href: "/clients", icon: Users },
-  { label: "Cotizaciones", href: "/quotations", icon: FileText },
-  { label: "Facturas", href: "/invoices", icon: Receipt, roles: ["admin", "directora", "analista"] },
-  { label: "Packing Lists", href: "/packing-lists", icon: Package, roles: ["admin", "directora", "analista"] },
-  { label: "Embarques", href: "/shipments", icon: Ship },
-  { label: "Pagos", href: "/payments", icon: CreditCard },
-  { label: "Reportes", href: "/reports", icon: BarChart3 },
-  { label: "Calendario", href: "/calendar", icon: Calendar },
-  { label: "Configuración", href: "/settings", icon: Settings, roles: ["admin", "directora"] },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, module: "dashboard" },
+  { label: "Contratos", href: "/contracts", icon: ClipboardList, module: "contracts" },
+  { label: "Clientes", href: "/clients", icon: Users, module: "clients" },
+  { label: "Cotizaciones", href: "/quotations", icon: FileText, module: "quotations" },
+  { label: "Facturas", href: "/invoices", icon: Receipt, module: "invoices" },
+  { label: "Packing List", href: "/packing-list-converter", icon: Package, module: "packing_list_converter" },
+  { label: "Embarques", href: "/shipments", icon: Ship, module: "shipments" },
+  { label: "Pagos", href: "/payments", icon: CreditCard, module: "payments" },
+  { label: "Reportes", href: "/reports", icon: BarChart3, module: "reports" },
+  { label: "Wiki", href: "/wiki", icon: BookOpen, module: "wiki" },
+  { label: "Calendario", href: "/calendar", icon: Calendar, module: "calendar" },
+  { label: "Configuración", href: "/settings", icon: Settings, module: "settings" },
 ];
 
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarState();
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
+  const { canViewModule, loading: permLoading } = usePermissions();
 
   const userRole = profile?.role || "comercial";
-  const filteredNav = navItems.filter(
-    (item) => !item.roles || item.roles.includes(userRole)
-  );
+  const filteredNav = navItems.filter((item) => {
+    if (!item.module) return true;
+    return canViewModule(item.module);
+  });
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -73,8 +80,9 @@ export function Sidebar() {
     <aside
       className={cn(
         "fixed left-0 top-0 z-40 h-screen flex flex-col sidebar-transition",
-        "bg-gradient-to-b from-[#1E3A5F] via-[#1a3355] to-[#152a47] text-white",
-        "shadow-[4px_0_24px_-4px_rgba(0,0,0,0.2)]",
+        "bg-gradient-to-b from-[#1a3a6b] via-[#1e3050] to-[#162240] text-white",
+        "shadow-[4px_0_30px_-2px_rgba(10,20,45,0.45)]",
+        "border-r border-white/[0.06]",
         collapsed ? "w-[72px]" : "w-[260px]"
       )}
     >
@@ -83,31 +91,28 @@ export function Sidebar() {
 
       {/* Logo */}
       <div className={cn(
-        "relative flex items-center gap-3 px-4 py-5 min-h-[80px]",
-        collapsed && "justify-center px-2"
+        "relative flex items-center justify-center px-4 py-5 min-h-[80px]",
+        collapsed ? "px-3" : "px-5"
       )}>
-        <div className="relative w-10 h-10 flex-shrink-0 rounded-xl overflow-hidden bg-white/10 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/10 shadow-lg">
+        <div className={cn(
+          "relative flex-shrink-0 transition-all duration-300",
+          collapsed ? "w-11 h-11" : "w-[180px] h-[52px]"
+        )}>
           <Image
             src="/logo-ibc.png"
             alt="IBC Steel Group"
-            width={36}
-            height={36}
-            className="object-contain"
+            fill
+            className="object-contain brightness-0 invert drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]"
+            priority
           />
         </div>
-        {!collapsed && (
-          <div className="animate-fade-in-up">
-            <h1 className="text-lg font-bold leading-tight text-white tracking-tight">IBC Core</h1>
-            <p className="text-[11px] text-blue-200/60 font-medium">Steel Group</p>
-          </div>
-        )}
       </div>
 
       {/* Gradient divider */}
-      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-blue-300/20 to-transparent" />
 
       {/* Navigation */}
-      <nav className="relative flex-1 py-4 px-2.5 space-y-1 overflow-y-auto">
+      <nav className="relative flex-1 py-4 px-2.5 space-y-1 overflow-y-auto sidebar-scroll">
         {filteredNav.map((item, index) => {
           const Icon = item.icon;
           const active = isActive(item.href);
@@ -119,8 +124,8 @@ export function Sidebar() {
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
                 active
-                  ? "bg-white/15 text-white shadow-lg shadow-black/10 backdrop-blur-sm ring-1 ring-white/10"
-                  : "text-blue-100/60 hover:bg-white/8 hover:text-white",
+                  ? "bg-white/[0.14] text-white shadow-lg shadow-blue-950/30 backdrop-blur-sm ring-1 ring-white/[0.12]"
+                  : "text-white/80 hover:bg-white/[0.08] hover:text-white",
                 collapsed && "justify-center px-2"
               )}
               style={{ animationDelay: `${index * 50}ms` }}
@@ -128,10 +133,10 @@ export function Sidebar() {
               <div className={cn(
                 "flex items-center justify-center h-8 w-8 rounded-lg transition-all duration-200 flex-shrink-0",
                 active
-                  ? "bg-white/15 shadow-sm"
+                  ? "bg-blue-400/20 shadow-sm shadow-blue-500/10"
                   : "bg-transparent group-hover:bg-white/5"
               )}>
-                <Icon className={cn("h-[18px] w-[18px]", active ? "text-blue-200" : "text-blue-200/50")} />
+                <Icon className={cn("h-[18px] w-[18px]", active ? "text-blue-300" : "text-blue-300/50")} />
               </div>
               {!collapsed && <span className="animate-slide-in-left">{item.label}</span>}
             </Link>
@@ -156,7 +161,7 @@ export function Sidebar() {
       <div className="relative px-2.5 py-2">
         <button
           onClick={toggle}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm text-blue-100/40 hover:bg-white/8 hover:text-white transition-all duration-200"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm text-blue-300/40 hover:bg-white/[0.08] hover:text-blue-100 transition-all duration-200"
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           {!collapsed && <span>Colapsar</span>}
@@ -164,22 +169,25 @@ export function Sidebar() {
       </div>
 
       {/* Gradient divider */}
-      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-blue-300/20 to-transparent" />
 
       {/* User profile */}
       <div className={cn(
         "relative p-3 flex items-center gap-3",
         collapsed && "justify-center p-2"
       )}>
-        <Avatar className="h-9 w-9 ring-2 ring-blue-400/20 flex-shrink-0 shadow-md">
-          <AvatarFallback className="bg-gradient-to-br from-blue-400/30 to-blue-600/30 text-white text-xs font-bold backdrop-blur-sm">
+        <Avatar className="h-9 w-9 ring-2 ring-blue-400/30 flex-shrink-0 shadow-md shadow-blue-950/20">
+          {profile?.avatar_url && (
+            <AvatarImage src={profile.avatar_url} alt={profile.full_name} className="object-cover" />
+          )}
+          <AvatarFallback className="bg-gradient-to-br from-blue-400/40 to-blue-600/40 text-white text-xs font-bold backdrop-blur-sm">
             {initials}
           </AvatarFallback>
         </Avatar>
         {!collapsed && (
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-white truncate">{profile?.full_name || "Usuario"}</p>
-            <p className="text-[11px] text-blue-200/50 truncate font-medium">{ROLE_LABELS[userRole] || userRole}</p>
+            <p className="text-[11px] text-blue-300/50 truncate font-medium">{ROLE_LABELS[userRole] || userRole}</p>
           </div>
         )}
         {!collapsed && (
@@ -187,7 +195,7 @@ export function Sidebar() {
             <TooltipTrigger asChild>
               <button
                 onClick={signOut}
-                className="p-1.5 rounded-lg text-blue-100/40 hover:bg-red-500/15 hover:text-red-300 transition-all duration-200"
+                className="p-1.5 rounded-lg text-blue-300/40 hover:bg-red-500/20 hover:text-red-300 transition-all duration-200"
               >
                 <LogOut className="h-4 w-4" />
               </button>

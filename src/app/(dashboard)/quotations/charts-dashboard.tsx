@@ -34,81 +34,143 @@ import {
 import type { ReportQuotation } from "./constants";
 
 // ---------------------------------------------------------------------------
-// Data from: REPORTE_EJECUTIVO_COTIZACIONES_2026 actualizado.xlsx
+// Helpers to compute dashboard data from props
 // ---------------------------------------------------------------------------
 
-const CUTOFF_DATE = "25 de Febrero, 2026";
+import { CATEGORY_CONFIG } from "./constants";
 
-const KPI = {
-  total: 131,
-  approved: 16,
-  inProcess: 25,
-  uniqueClients: 72,
-  avgResponseDays: 6.6,
-  approvalRate: 12.2,
-  closeRate: 68.7,
-  avgChinaDays: 2.4,
+const STATUS_COLORS: Record<string, string> = {
+  Finalizado: "#6366F1",
+  "Pendiente cotización": "#D97706",
+  Aprobado: "#059669",
+  "En negociación": "#0891B2",
 };
 
-const GESTION = [
-  { estado: "Finalizado", cantidad: 90, pct: 68.7, color: "#6366F1" },
-  { estado: "Pendiente cotización", cantidad: 18, pct: 13.7, color: "#D97706" },
-  { estado: "Aprobado", cantidad: 16, pct: 12.2, color: "#059669" },
-  { estado: "En negociación", cantidad: 7, pct: 5.3, color: "#0891B2" },
-];
-
-const COMERCIALES = [
-  { name: "Pablo", total: 53, aprobadas: 8, efectividad: 15.1, pendientes: 9, negociacion: 2 },
-  { name: "Ever", total: 17, aprobadas: 2, efectividad: 11.8, pendientes: 2, negociacion: 0 },
-  { name: "Carlos Bacca", total: 13, aprobadas: 0, efectividad: 0, pendientes: 3, negociacion: 2 },
-  { name: "Carlos Augusto", total: 10, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 0 },
-  { name: "Maria Fernanda", total: 9, aprobadas: 2, efectividad: 22.2, pendientes: 0, negociacion: 0 },
-  { name: "Carlos", total: 8, aprobadas: 4, efectividad: 50.0, pendientes: 0, negociacion: 0 },
-  { name: "Jose Rodriguez", total: 4, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 0 },
-  { name: "Heidy", total: 4, aprobadas: 0, efectividad: 0, pendientes: 2, negociacion: 0 },
-  { name: "Andrés Rodriguez", total: 3, aprobadas: 0, efectividad: 0, pendientes: 1, negociacion: 1 },
-  { name: "Carolina", total: 3, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 1 },
-  { name: "Maka", total: 2, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 0 },
-  { name: "Martha Elena", total: 2, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 0 },
-  { name: "Cristian", total: 2, aprobadas: 0, efectividad: 0, pendientes: 0, negociacion: 1 },
-  { name: "Ana Penagos", total: 1, aprobadas: 0, efectividad: 0, pendientes: 1, negociacion: 0 },
-];
-
-const TIEMPOS = [
-  { name: "Andrés Rodriguez", cotizaciones: 1, promedio: 1.0, min: 1, max: 1 },
-  { name: "Cristian", cotizaciones: 1, promedio: 1.0, min: 1, max: 1 },
-  { name: "Martha Elena", cotizaciones: 2, promedio: 1.5, min: 1, max: 2 },
-  { name: "Heidy", cotizaciones: 2, promedio: 1.5, min: 1, max: 2 },
-  { name: "Carolina", cotizaciones: 2, promedio: 1.5, min: 1, max: 2 },
-  { name: "Maria Fernanda", cotizaciones: 7, promedio: 2.0, min: 1, max: 4 },
-  { name: "Ever", cotizaciones: 15, promedio: 2.1, min: 1, max: 7 },
-  { name: "Carlos Bacca", cotizaciones: 7, promedio: 2.6, min: 1, max: 12 },
-  { name: "Carlos Augusto", cotizaciones: 8, promedio: 3.1, min: 1, max: 6 },
-  { name: "Carlos", cotizaciones: 8, promedio: 3.2, min: 1, max: 8 },
-  { name: "Jose Rodriguez", cotizaciones: 4, promedio: 3.5, min: 1, max: 5 },
-  { name: "Pablo", cotizaciones: 38, promedio: 12.3, min: 1, max: 364 },
-  { name: "Maka", cotizaciones: 2, promedio: 17.0, min: 1, max: 33 },
-];
-
-const LINEAS = [
-  { linea: "MP", label: "Materia Prima", cantidad: 99, pct: 75.6, color: "#2563EB" },
-  { linea: "MAQUINARIA", label: "Maquinaria", cantidad: 21, pct: 16.0, color: "#7C3AED" },
-  { linea: "LINEA AGRO", label: "Línea Agro", cantidad: 10, pct: 7.6, color: "#059669" },
-  { linea: "REPUESTOS", label: "Repuestos", cantidad: 1, pct: 0.8, color: "#D97706" },
-];
-
-const PAISES = [
-  { pais: "Colombia", flag: "🇨🇴", cantidad: 123, pct: 93.9 },
-  { pais: "Venezuela", flag: "🇻🇪", cantidad: 4, pct: 3.1 },
-  { pais: "Chile", flag: "🇨🇱", cantidad: 3, pct: 2.3 },
-  { pais: "Emiratos Árabes", flag: "🇦🇪", cantidad: 1, pct: 0.8 },
-];
-
-const CHINA = {
-  avgDays: 2.4,
-  atrasado: { cantidad: 121, pct: 92.4 },
-  aTiempo: { cantidad: 10, pct: 7.6 },
+const CATEGORY_COLORS: Record<string, string> = {
+  MP: "#2563EB",
+  MAQUINARIA: "#7C3AED",
+  "LINEA AGRO": "#059669",
+  REPUESTOS: "#D97706",
 };
+
+function computeDashboardData(data: ReportQuotation[]) {
+  const total = data.length;
+  const approved = data.filter((d) => d.status === "Aprobado").length;
+  const pendiente = data.filter((d) => d.status === "Pendiente cotización").length;
+  const negociacion = data.filter((d) => d.status === "En negociación").length;
+  const finalizado = data.filter((d) => d.status === "Finalizado").length;
+  const inProcess = pendiente + negociacion;
+  const uniqueClients = new Set(data.map((d) => d.customer)).size;
+
+  const responseTimes = data.filter((d) => d.responseTime != null).map((d) => d.responseTime!);
+  const avgResponseDays = responseTimes.length > 0
+    ? Math.round((responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length) * 10) / 10
+    : 0;
+
+  const chinaTimes = data.filter((d) => d.chinaTime != null).map((d) => d.chinaTime!);
+  const avgChinaDays = chinaTimes.length > 0
+    ? Math.round((chinaTimes.reduce((a, b) => a + b, 0) / chinaTimes.length) * 10) / 10
+    : 0;
+
+  const approvalRate = total > 0 ? Math.round((approved / total) * 1000) / 10 : 0;
+  const closeRate = total > 0 ? Math.round((finalizado / total) * 1000) / 10 : 0;
+
+  const KPI = { total, approved, inProcess, uniqueClients, avgResponseDays, approvalRate, closeRate, avgChinaDays };
+
+  // Status distribution
+  const statusCounts: Record<string, number> = {};
+  data.forEach((d) => { statusCounts[d.status] = (statusCounts[d.status] || 0) + 1; });
+  const GESTION = Object.entries(statusCounts)
+    .map(([estado, cantidad]) => ({
+      estado,
+      cantidad,
+      pct: total > 0 ? Math.round((cantidad / total) * 1000) / 10 : 0,
+      color: STATUS_COLORS[estado] || "#94A3B8",
+    }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+
+  // Commercial performance
+  const commercialMap: Record<string, { total: number; aprobadas: number; pendientes: number; negociacion: number; times: number[] }> = {};
+  data.forEach((d) => {
+    const name = d.requestedBy || "Sin asignar";
+    if (!commercialMap[name]) commercialMap[name] = { total: 0, aprobadas: 0, pendientes: 0, negociacion: 0, times: [] };
+    commercialMap[name].total++;
+    if (d.status === "Aprobado") commercialMap[name].aprobadas++;
+    if (d.status === "Pendiente cotización") commercialMap[name].pendientes++;
+    if (d.status === "En negociación") commercialMap[name].negociacion++;
+    if (d.responseTime != null) commercialMap[name].times.push(d.responseTime);
+  });
+  const COMERCIALES = Object.entries(commercialMap)
+    .map(([name, v]) => ({
+      name,
+      total: v.total,
+      aprobadas: v.aprobadas,
+      efectividad: v.total > 0 ? Math.round((v.aprobadas / v.total) * 1000) / 10 : 0,
+      pendientes: v.pendientes,
+      negociacion: v.negociacion,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  // Response times by commercial
+  const TIEMPOS = Object.entries(commercialMap)
+    .filter(([, v]) => v.times.length > 0)
+    .map(([name, v]) => ({
+      name,
+      cotizaciones: v.times.length,
+      promedio: Math.round((v.times.reduce((a, b) => a + b, 0) / v.times.length) * 10) / 10,
+      min: Math.min(...v.times),
+      max: Math.max(...v.times),
+    }))
+    .sort((a, b) => a.promedio - b.promedio);
+
+  // Product lines
+  const catCounts: Record<string, number> = {};
+  data.forEach((d) => { const cat = d.category || "Otro"; catCounts[cat] = (catCounts[cat] || 0) + 1; });
+  const LINEAS = Object.entries(catCounts)
+    .map(([linea, cantidad]) => ({
+      linea,
+      label: CATEGORY_CONFIG[linea]?.label || linea,
+      cantidad,
+      pct: total > 0 ? Math.round((cantidad / total) * 1000) / 10 : 0,
+      color: CATEGORY_COLORS[linea] || "#94A3B8",
+    }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+
+  const maxLinePct = Math.max(...LINEAS.map((l) => l.pct), 1);
+
+  // Country distribution
+  const countryCounts: Record<string, number> = {};
+  data.forEach((d) => { const c = d.country || "Desconocido"; countryCounts[c] = (countryCounts[c] || 0) + 1; });
+  const PAISES = Object.entries(countryCounts)
+    .map(([pais, cantidad]) => ({
+      pais,
+      flag: getCountryFlagLocal(pais),
+      cantidad,
+      pct: total > 0 ? Math.round((cantidad / total) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+
+  // China times
+  const chinaAtrasado = data.filter((d) => d.chinaStatus === "Atrasado" || (d.chinaTime != null && d.chinaTime > 3)).length;
+  const chinaATiempo = data.filter((d) => d.chinaStatus === "A tiempo" || (d.chinaTime != null && d.chinaTime <= 3)).length;
+  const chinaTotal = chinaAtrasado + chinaATiempo || 1;
+  const CHINA = {
+    avgDays: avgChinaDays,
+    atrasado: { cantidad: chinaAtrasado, pct: Math.round((chinaAtrasado / chinaTotal) * 1000) / 10 },
+    aTiempo: { cantidad: chinaATiempo, pct: Math.round((chinaATiempo / chinaTotal) * 1000) / 10 },
+  };
+
+  return { KPI, GESTION, COMERCIALES, TIEMPOS, LINEAS, maxLinePct, PAISES, CHINA };
+}
+
+function getCountryFlagLocal(country: string): string {
+  const flags: Record<string, string> = {
+    Colombia: "\u{1F1E8}\u{1F1F4}", Venezuela: "\u{1F1FB}\u{1F1EA}", Chile: "\u{1F1E8}\u{1F1F1}",
+    "Emiratos Árabes": "\u{1F1E6}\u{1F1EA}", Ecuador: "\u{1F1EA}\u{1F1E8}", Perú: "\u{1F1F5}\u{1F1EA}",
+    México: "\u{1F1F2}\u{1F1FD}", Brasil: "\u{1F1E7}\u{1F1F7}", Argentina: "\u{1F1E6}\u{1F1F7}",
+  };
+  return flags[country] || "\u{1F30D}";
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -224,8 +286,13 @@ interface Props {
   data: ReportQuotation[];
 }
 
-export default function ChartsDashboard(_props: Props) {
-  const maxTotal = Math.max(...COMERCIALES.map((c) => c.total));
+export default function ChartsDashboard({ data }: Props) {
+  const { KPI, GESTION, COMERCIALES, TIEMPOS, LINEAS, maxLinePct, PAISES, CHINA } = React.useMemo(
+    () => computeDashboardData(data),
+    [data]
+  );
+  const CUTOFF_DATE = new Date().toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
+  const maxTotal = Math.max(...COMERCIALES.map((c) => c.total), 1);
 
   return (
     <div className="p-5 space-y-5">
@@ -418,7 +485,7 @@ export default function ChartsDashboard(_props: Props) {
                   <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-700"
-                      style={{ width: `${(l.pct / 75.6) * 100}%`, backgroundColor: l.color }}
+                      style={{ width: `${(l.pct / maxLinePct) * 100}%`, backgroundColor: l.color }}
                     />
                   </div>
                 </div>
@@ -521,8 +588,8 @@ export default function ChartsDashboard(_props: Props) {
             <div className="flex justify-center">
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">{KPI.approvalRate}%</span>
             </div>
-            <span className="text-xs font-bold text-amber-600 text-center">18</span>
-            <span className="text-xs font-bold text-cyan-600 text-center">7</span>
+            <span className="text-xs font-bold text-amber-600 text-center">{COMERCIALES.reduce((s, c) => s + c.pendientes, 0)}</span>
+            <span className="text-xs font-bold text-cyan-600 text-center">{COMERCIALES.reduce((s, c) => s + c.negociacion, 0)}</span>
           </div>
         </div>
       </SectionCard>
@@ -639,8 +706,8 @@ export default function ChartsDashboard(_props: Props) {
               <div>
                 <p className="text-[11px] font-bold text-slate-700">Insight geográfico</p>
                 <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                  Colombia concentra el <b>93.9%</b> de las cotizaciones. Se identifican oportunidades de
-                  expansión en Venezuela, Chile y Emiratos Árabes.
+                  {PAISES[0]?.pais || "Principal país"} concentra el <b>{PAISES[0]?.pct || 0}%</b> de las cotizaciones.
+                  {PAISES.length > 1 && ` Se identifican oportunidades de expansión en ${PAISES.slice(1, 4).map(p => p.pais).join(", ")}.`}
                 </p>
               </div>
             </div>
@@ -730,14 +797,14 @@ export default function ChartsDashboard(_props: Props) {
                 <div className="flex items-start gap-2">
                   <TrendingDown className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    El <b className="text-red-600">92.4%</b> de las cotizaciones tiene tiempos de respuesta China
+                    El <b className="text-red-600">{CHINA.atrasado.pct}%</b> de las cotizaciones tiene tiempos de respuesta China
                     por encima del objetivo. Se requiere gestión inmediata con proveedores.
                   </p>
                 </div>
                 <div className="flex items-start gap-2">
                   <TrendingUp className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Solo <b className="text-emerald-600">10 cotizaciones</b> cumplen con los tiempos establecidos.
+                    Solo <b className="text-emerald-600">{CHINA.aTiempo.cantidad} cotizaciones</b> cumplen con los tiempos establecidos.
                     Se recomienda revisar acuerdos de nivel de servicio.
                   </p>
                 </div>

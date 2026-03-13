@@ -5,7 +5,7 @@
  * Usage: node scripts/migrate-auto.js
  */
 
-const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
 
@@ -85,13 +85,23 @@ function normalizeProductType(val) {
 
 async function main() {
   console.log("Reading Excel file:", EXCEL_PATH);
-  const wb = XLSX.readFile(EXCEL_PATH);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(EXCEL_PATH);
+
+  // Helper: convert ExcelJS worksheet to array-of-arrays (like XLSX sheet_to_json with header:1)
+  function sheetToRows(ws) {
+    const rows = [];
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      rows.push(row.values.slice(1)); // row.values is 1-indexed, slice to make 0-indexed
+    });
+    return rows;
+  }
 
   // ─── 1. Migrate STATUS → contracts ──────────────────────────────
   console.log("\n=== Migrating CONTRACTS ===");
 
-  const wsStatus = wb.Sheets["STATUS"];
-  const statusData = XLSX.utils.sheet_to_json(wsStatus, { header: 1 });
+  const wsStatus = wb.getWorksheet("STATUS");
+  const statusData = sheetToRows(wsStatus);
 
   const contractRows = [];
 
@@ -177,8 +187,8 @@ async function main() {
   // ─── 2. Migrate FACTURAS → contract_invoices ───────────────────
   console.log("\n=== Migrating CONTRACT INVOICES ===");
 
-  const wsFact = wb.Sheets["FACTURAS"];
-  const factData = XLSX.utils.sheet_to_json(wsFact, { header: 1 });
+  const wsFact = wb.getWorksheet("FACTURAS");
+  const factData = sheetToRows(wsFact);
 
   const invoiceRows = [];
 

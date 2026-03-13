@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import {
   Plus,
   Search,
@@ -23,6 +25,7 @@ import {
   CalendarIcon,
   CreditCard,
   Download,
+  FileDown,
   SlidersHorizontal,
   User,
   Building2,
@@ -1297,6 +1300,7 @@ export default function ContractsPage() {
       const INK_MUTED = "6B7080";
       const INK_LIGHT = "9CA3B4";
       const FONT = "Aptos";
+      const logoId = await addLogoToWorkbook(workbook);
 
       // Status colors
       const statusStyles: Record<string, { bg: string; text: string }> = {
@@ -1378,20 +1382,20 @@ export default function ContractsPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: FONT, size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: FONT, size: 12, color: { argb: WHITE } } },
-        { text: `          REPORTE DE CONTRATOS`, font: { name: FONT, size: 10, bold: true, color: { argb: WHITE } } },
+        { text: "                              ", font: { name: FONT, size: 16, color: { argb: NAVY } } },
+        { text: "REPORTE DE CONTRATOS", font: { name: FONT, size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${exportData.length} registros`, font: { name: FONT, size: 9, color: { argb: "D0DCE8" } } },
         ...(filterDesc.length > 0 ? [{ text: `     ${filterDesc.join(" · ")}`, font: { name: FONT, size: 8, italic: true, color: { argb: "A8BED4" } } }] : []),
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ══════════════════════════════════════════════════════
       // ROW 2: Spacer
@@ -1634,6 +1638,143 @@ export default function ContractsPage() {
   };
 
   // =====================================================
+  // Download PDF Report (same filters as Excel)
+  // =====================================================
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
+
+  const handleDownloadPDF = async () => {
+    try {
+      setDownloadingPDF(true);
+      toast.info("Generando reporte PDF...");
+
+      // Fetch ALL contracts with same filters as Excel
+      const params = new URLSearchParams();
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (filterCommercial.length) params.set("commercial_name", filterCommercial.join(","));
+      if (filterClient.length) params.set("client_name", filterClient.join(","));
+      if (filterIncoterm.length) params.set("incoterm", filterIncoterm.join(","));
+      if (filterVessel.length) params.set("vessel_name", filterVessel.join(","));
+      if (filterPort.length) params.set("arrival_port", filterPort.join(","));
+      if (filterBlReleased.length) params.set("bl_released", filterBlReleased.join(","));
+      if (filterProductType.length) {
+        const defined = filterProductType.filter((v) => v !== "SIN_DEFINIR");
+        const hasUndefined = filterProductType.includes("SIN_DEFINIR");
+        if (defined.length) params.set("product_type", defined.join(","));
+        if (hasUndefined) params.set("product_type_undefined", "true");
+      }
+      if (filterEtaFinal.length) params.set("eta_final", filterEtaFinal.join(","));
+      const pdfStatuses = [...filterStatus];
+      if (filterBalancePaid.length) {
+        params.set("balance_paid", filterBalancePaid.join(","));
+        if (filterBalancePaid.includes("PENDIENTE") && pdfStatuses.length === 0) {
+          pdfStatuses.push("EN PRODUCCIÓN", "EN TRÁNSITO");
+        }
+      }
+      if (pdfStatuses.length) params.set("status", pdfStatuses.join(","));
+      if (filterDateFrom) params.set("date_from", filterDateFrom);
+      if (filterDateTo) params.set("date_to", filterDateTo);
+      params.set("sort_field", sortField);
+      params.set("sort_direction", sortDirection);
+      params.set("page", "1");
+      params.set("pageSize", "5000");
+
+      const res = await fetch(`/api/contracts?${params.toString()}`);
+      if (!res.ok) throw new Error("Error al obtener los contratos");
+      const { data: allContracts } = await res.json();
+      const exportData: Contract[] = allContracts || [];
+
+      // Build filter description for subtitle
+      const filterDesc: string[] = [];
+      if (filterCommercial.length) filterDesc.push(`Comercial: ${filterCommercial.join(", ")}`);
+      if (filterClient.length) filterDesc.push(`Cliente: ${filterClient.join(", ")}`);
+      if (filterStatus.length) filterDesc.push(`Estado: ${filterStatus.join(", ")}`);
+      if (filterIncoterm.length) filterDesc.push(`Incoterm: ${filterIncoterm.join(", ")}`);
+      if (filterProductType.length) filterDesc.push(`Tipo: ${filterProductType.join(", ")}`);
+      if (filterVessel.length) filterDesc.push(`Motonave: ${filterVessel.join(", ")}`);
+      if (filterPort.length) filterDesc.push(`Puerto: ${filterPort.join(", ")}`);
+      if (filterBlReleased.length) filterDesc.push(`BL: ${filterBlReleased.join(", ")}`);
+      if (filterBalancePaid.length) filterDesc.push(`Saldo: ${filterBalancePaid.join(", ")}`);
+      if (filterDateFrom || filterDateTo) filterDesc.push(`Fecha: ${filterDateFrom || "..."} a ${filterDateTo || "..."}`);
+      if (debouncedSearch) filterDesc.push(`Búsqueda: "${debouncedSearch}"`);
+
+      const subtitle = filterDesc.length > 0
+        ? `Filtros: ${filterDesc.join(" · ")}`
+        : "Todos los contratos";
+
+      const fmtDate = (d: string | null | undefined) => {
+        if (!d) return "—";
+        try {
+          const iso = d.split("T")[0];
+          const [y, m, day] = iso.split("-").map(Number);
+          if (y && m && day) return `${String(day).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+          return "—";
+        } catch { return "—"; }
+      };
+
+      const pdfData = exportData.map((c) => ({
+        contract_date: fmtDate(c.contract_date),
+        china_contract: c.china_contract || "—",
+        client_contract: c.client_contract || "—",
+        commercial_name: c.commercial_name || "—",
+        client_name: c.client_name || "—",
+        country: c.country || "—",
+        detail: c.detail || "—",
+        tons_agreed: c.tons_agreed != null ? formatNumber(c.tons_agreed) : "—",
+        tons_shipped: c.tons_shipped != null ? formatNumber(c.tons_shipped) : "—",
+        incoterm: c.incoterm || "—",
+        exw_date: fmtDate(c.exw_date),
+        status: c.status || "—",
+        eta_final: fmtDate(c.eta_final),
+        vessel_name: c.vessel_name || "—",
+        bl_number: c.bl_number || "—",
+        arrival_port: c.arrival_port || "—",
+        advance_paid: c.advance_paid || "—",
+        balance_paid: c.balance_paid || "—",
+        pending_amount: c.pending_client_amount != null ? formatCurrency(c.pending_client_amount) : "—",
+        notes: c.notes || "—",
+      }));
+
+      await generatePDFReport({
+        title: "REPORTE DE CONTRATOS",
+        subtitle,
+        filename: "Contratos_IBC",
+        orientation: "landscape",
+        recordLabel: "contratos",
+        columns: [
+          { header: "FECHA", dataKey: "contract_date", width: 0.8, halign: "center" },
+          { header: "CONTRATO CHINA", dataKey: "china_contract", width: 1.2, bold: true, color: "#1E3A5F" },
+          { header: "CONTRATO CLIENTE", dataKey: "client_contract", width: 1.1, bold: true, color: "#1E3A5F" },
+          { header: "COMERCIAL", dataKey: "commercial_name", width: 1.1, bold: true },
+          { header: "CLIENTE", dataKey: "client_name", width: 1.4 },
+          { header: "PAÍS", dataKey: "country", width: 0.7, halign: "center" },
+          { header: "DETALLE", dataKey: "detail", width: 2 },
+          { header: "TONS ACORD.", dataKey: "tons_agreed", width: 0.9, halign: "right" },
+          { header: "TONS EMBAR.", dataKey: "tons_shipped", width: 0.9, halign: "right" },
+          { header: "INCOTERM", dataKey: "incoterm", width: 0.7, halign: "center" },
+          { header: "FECHA EXW", dataKey: "exw_date", width: 0.8, halign: "center" },
+          { header: "ESTADO", dataKey: "status", width: 1.2, halign: "center", bold: true },
+          { header: "ETA FINAL", dataKey: "eta_final", width: 0.8, halign: "center" },
+          { header: "MOTONAVE", dataKey: "vessel_name", width: 1 },
+          { header: "Nº BL", dataKey: "bl_number", width: 1 },
+          { header: "PUERTO", dataKey: "arrival_port", width: 0.9 },
+          { header: "ANTICIPO", dataKey: "advance_paid", width: 0.7, halign: "center" },
+          { header: "SALDO", dataKey: "balance_paid", width: 0.7, halign: "center" },
+          { header: "PDTE. (USD)", dataKey: "pending_amount", width: 1, halign: "right", bold: true, color: "#B45309" },
+          { header: "NOTAS", dataKey: "notes", width: 1.5 },
+        ],
+        data: pdfData,
+      });
+
+      toast.success("Reporte PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el reporte PDF");
+    } finally {
+      setDownloadingPDF(false);
+    }
+  };
+
+  // =====================================================
   // Truncate helper
   // =====================================================
   const truncate = (text: string | null | undefined, maxLen: number) => {
@@ -1690,6 +1831,29 @@ export default function ContractsPage() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleDownloadPDF}
+              disabled={downloadingPDF}
+              style={{
+                padding: "7px 14px", borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)",
+                color: "#fff", fontWeight: 600, fontSize: 12,
+                cursor: "pointer", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
+                display: "flex", alignItems: "center", gap: 5,
+                transition: "all 0.2s ease",
+                opacity: downloadingPDF ? 0.6 : 1,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.2)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+            >
+              {downloadingPDF ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4" />
+              )}
+              Descargar PDF
+            </button>
             <button
               onClick={handleDownloadExcel}
               disabled={downloading}

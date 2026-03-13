@@ -62,6 +62,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -71,6 +73,18 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Rate limiting: lock after 5 failed attempts for 60 seconds
+    if (lockedUntil && Date.now() < lockedUntil) {
+      const secsLeft = Math.ceil((lockedUntil - Date.now()) / 1000);
+      toast.error(`Demasiados intentos. Espere ${secsLeft} segundos.`);
+      return;
+    }
+    if (lockedUntil && Date.now() >= lockedUntil) {
+      setLockedUntil(null);
+      setLoginAttempts(0);
+    }
+
     setLoading(true);
 
     try {
@@ -80,9 +94,18 @@ export default function LoginPage() {
       });
 
       if (error) {
-        toast.error("Error de autenticacion", {
-          description: "Correo o contrasena incorrectos. Intenta de nuevo.",
-        });
+        const newAttempts = loginAttempts + 1;
+        setLoginAttempts(newAttempts);
+        if (newAttempts >= 5) {
+          setLockedUntil(Date.now() + 60000); // Lock for 60 seconds
+          toast.error("Demasiados intentos fallidos", {
+            description: "Cuenta bloqueada temporalmente. Espere 60 segundos.",
+          });
+        } else {
+          toast.error("Error de autenticacion", {
+            description: `Correo o contrasena incorrectos. Intentos restantes: ${5 - newAttempts}`,
+          });
+        }
         return;
       }
 

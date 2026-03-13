@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import {
   Plus,
   Search,
@@ -109,22 +110,12 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+
+const InvoiceConverterContent = dynamic(() => import("@/app/(dashboard)/invoice-converter/page"), { ssr: false });
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF", surface: "#FFFFFF", surfaceHover: "#FCFBF9", surfaceAlt: "#FAF9F7",
-  ink: "#18191D", inkSoft: "#3D4049", inkMuted: "#6B7080", inkLight: "#9CA3B4", inkGhost: "#C5CAD5",
-  accent: "#0B5394", accentLight: "#E8F0FE", accentDark: "#083D6E",
-  success: "#0D9F6E", successBg: "#ECFDF3", warning: "#DC8B0B", warningBg: "#FFF8EB",
-  danger: "#E63946", dangerBg: "#FFF1F2",
-  blue: "#3B82F6", blueBg: "#EFF6FF", violet: "#7C5CFC", violetBg: "#F3F0FF",
-  teal: "#0EA5A5", tealBg: "#EDFCFC", orange: "#F97316", orangeBg: "#FFF7ED",
-  border: "#E8E6E1", borderLight: "#F0EDE8",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowMd: "0 2px 4px rgba(26,29,35,0.04), 0 8px 20px rgba(26,29,35,0.05)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px", radiusMd: "14px", radiusSm: "10px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const Ic = {
@@ -139,6 +130,7 @@ const Ic = {
   users: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
   file: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>,
   chevR: <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>,
+  upload: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>,
 };
 
 // ─── RING CHART ──────────────────────────────────────────────
@@ -342,7 +334,8 @@ export default function InvoicesPage() {
   // Active tab state — read from URL ?tab=china
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get("tab");
-    return tab === "china" ? "china" : "comerciales";
+    if (tab === "conversor") return "conversor";
+    return tab === "china" ? "china" : "china";
   });
 
   // =====================================================
@@ -455,31 +448,35 @@ export default function InvoicesPage() {
           .from("clients")
           .select("id, company_name, trade_name, contact_name, email, country")
           .eq("is_active", true)
-          .order("company_name"),
+          .order("company_name")
+          .limit(2000),
         supabase
           .from("profiles")
           .select("id, full_name, email, role")
           .eq("is_active", true)
-          .order("full_name"),
+          .order("full_name")
+          .limit(500),
         supabase
           .from("quotations")
           .select("id, quotation_number, client_id, status, total_value_usd")
           .eq("is_active", true)
           .in("status", ["aprobada", "contrato"])
-          .order("created_at", { ascending: false }),
+          .order("created_at", { ascending: false })
+          .limit(2000),
         supabase
           .from("vessels")
           .select("id, vessel_name, shipping_line")
           .eq("is_active", true)
-          .order("vessel_name"),
+          .order("vessel_name")
+          .limit(500),
       ]);
 
       if (clientsRes.data) setClients(clientsRes.data as Client[]);
       if (commercialsRes.data) setCommercials(commercialsRes.data as Profile[]);
       if (quotationsRes.data) setQuotations(quotationsRes.data as Quotation[]);
       if (vesselsRes.data) setVessels(vesselsRes.data as Vessel[]);
-    } catch {
-      console.error("Error fetching reference data");
+    } catch (err) {
+      console.error("Error fetching reference data", err);
     }
   }, []);
 
@@ -913,8 +910,8 @@ export default function InvoicesPage() {
         const json = await res.json();
         setChinaFilterOptions(json);
       }
-    } catch {
-      console.error("Error fetching china filter options");
+    } catch (err) {
+      console.error("Error fetching china filter options", err);
     }
   }, [chinaFilterClient]);
 
@@ -1222,6 +1219,7 @@ export default function InvoicesPage() {
       const ACCENT_GOLD = "C9A227";
       const WHITE = "FFFFFF";
       const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       const statusStyles: Record<string, { bg: string; text: string }> = {
         approved: { bg: "DCFCE7", text: "166534" },
@@ -1269,20 +1267,20 @@ export default function InvoicesPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: "FFFFFF" } } },
-        { text: `          REPORTE DE FACTURAS CHINA`, font: { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "REPORTE DE FACTURAS CHINA", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${exportData.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
         ...(filterDesc.length > 0 ? [{ text: `     ${filterDesc.join(" · ")}`, font: { name: "Aptos", size: 8, italic: true, color: { argb: "A8BED4" } } }] : []),
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: "FFFFFF" } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
@@ -1467,6 +1465,7 @@ export default function InvoicesPage() {
       const ACCENT_GOLD = "C9A227";
       const WHITE = "FFFFFF";
       const TEXT_DARK = "1A202C";
+      const logoId2 = await addLogoToWorkbook(workbook);
 
       const paymentStatusStyles: Record<string, { bg: string; text: string }> = {
         pendiente: { bg: "FEF3C7", text: "92400E" },
@@ -1521,20 +1520,20 @@ export default function InvoicesPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: "FFFFFF" } } },
-        { text: `          REPORTE DE FACTURACIÓN`, font: { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "REPORTE DE FACTURACIÓN", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${exportData.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
         ...(filterDesc.length > 0 ? [{ text: `     ${filterDesc.join(" · ")}`, font: { name: "Aptos", size: 8, italic: true, color: { argb: "A8BED4" } } }] : []),
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: "FFFFFF" } } };
       }
+      addLogoToHeader(ws, logoId2, totalCols);
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
@@ -1751,7 +1750,7 @@ export default function InvoicesPage() {
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: activeTab === "conversor" ? "none" : "flex", gap: 8 }}>
             <button
               onClick={activeTab === "comerciales" ? handleCommDownloadExcel : handleChinaDownloadExcel}
               disabled={activeTab === "comerciales" ? commDownloading : chinaDownloading}
@@ -1801,8 +1800,8 @@ export default function InvoicesPage() {
           animation: "invFadeUp 0.5s ease 0.1s both",
         }}>
           {[
-            { key: "comerciales", label: "FACTURACIÓN", icon: Ic.file },
             { key: "china", label: "FACTURAS", icon: Ic.receipt },
+            { key: "conversor", label: "CONVERSOR", icon: Ic.upload },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -2523,6 +2522,13 @@ export default function InvoicesPage() {
               </>
             )}
           </InvCard>
+        </TabsContent>
+
+        {/* =====================================================
+            TAB: Conversor de Facturas
+            ===================================================== */}
+        <TabsContent value="conversor" style={{ display: activeTab === "conversor" ? "block" : "none", marginTop: 16 }}>
+          <InvoiceConverterContent />
         </TabsContent>
       </Tabs>
 

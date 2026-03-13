@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { Download, Loader2, CreditCard, RefreshCw } from "lucide-react";
+import { Download, Loader2, CreditCard, RefreshCw, FileDown } from "lucide-react";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -75,134 +77,213 @@ export default function PaymentsReportPage() {
 
   const handleExport = async () => {
     try {
-      const catLabel = CATEGORIES.find((c) => c.key === activeCategory)?.label || activeCategory;
-      toast.info("Generando reporte Excel...");
+      toast.info("Generando reporte completo Excel...");
       const excelMod = await import("exceljs");
       const ExcelJS = excelMod.default || excelMod;
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "IBC Steel Group - IBC Core";
       workbook.created = new Date();
 
-      const ws = workbook.addWorksheet(catLabel.toUpperCase(), {
-        properties: { defaultColWidth: 18 },
-        views: [{ state: "frozen" as const, ySplit: 3 }],
-      });
-
       const NAVY = "1E3A5F";
       const WHITE = "FFFFFF";
       const TEXT_DARK = "1A202C";
-
-      const colHeaders = isImpo
-        ? ["Contrato China", "USD Factura", "% Depósito", "Saldo a Pagar", "Pago Colombia", "Proveedor", "Cuenta", "Numeral Cambiario", "Estado"]
-        : ["Cliente", "Descripción", "Contrato China", "USD Factura", "Depósito", "Saldo / %", "Pago Colombia", "Proveedor", "Cuenta", "Pago Cliente", "Observaciones"];
-
-      const colWidths = isImpo
-        ? [20, 14, 12, 14, 18, 24, 30, 16, 12]
-        : [22, 20, 20, 14, 14, 16, 18, 24, 30, 14, 24];
-
-      ws.columns = colHeaders.map((_, i) => ({ width: colWidths[i] }));
-      const totalCols = colHeaders.length;
+      const logoId = await addLogoToWorkbook(workbook);
       const now = new Date();
       const dateStr = now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
-      // ROW 1: Header
-      const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
-      const c1 = ws.getCell("A1");
-      c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: WHITE } } },
-        { text: `          ${catLabel.toUpperCase()}`, font: { name: "Aptos", size: 10, bold: true, color: { argb: WHITE } } },
-        { text: `     ${dateStr}  ·  ${filtered.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
-      ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
-      c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
-      for (let col = 1; col <= totalCols; col++) {
-        const cell = r1.getCell(col);
-        if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-        cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
-      }
+      for (const cat of CATEGORIES) {
+        const catPayments = payments.filter((p) => p.category === cat.key);
+        const catIsImpo = cat.key === "impo";
 
-      // ROW 2: Spacer
-      const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
-      r2.height = 5;
-      for (let col = 1; col <= totalCols; col++) {
-        r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
-      }
-
-      // ROW 3: Column headers
-      const hRow = ws.addRow(colHeaders);
-      hRow.height = 32;
-      hRow.eachCell((cell) => {
-        cell.font = { name: "Aptos", size: 9, bold: true, color: { argb: WHITE } };
-        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-        cell.border = {
-          bottom: { style: "thin" as const, color: { argb: WHITE } },
-          left: { style: "thin" as const, color: { argb: "2D5A8A" } },
-          right: { style: "thin" as const, color: { argb: "2D5A8A" } },
-          top: { style: "thin" as const, color: { argb: "2D5A8A" } },
-        };
-      });
-
-      // DATA ROWS
-      filtered.forEach((p, idx) => {
-        const values = isImpo
-          ? [p.china_sales_contract || "", fmtNum(p.usd_invoice), p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "", fmtNum(p.balance_to_pay), p.payment_colombia || "", p.suppliers?.name || "", p.account_info || "", p.numeral_cambiario || "", STATUS_CFG[p.status]?.label || p.status]
-          : [p.client || "", p.description || "", p.china_sales_contract || "", fmtNum(p.usd_invoice), fmtNum(p.deposit), p.balance_to_pay != null ? fmtNum(p.balance_to_pay) : p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "", p.payment_colombia || "", p.suppliers?.name || "", p.account_info || "", fmtNum(p.client_payment), p.remarks || ""];
-
-        const row = ws.addRow(values);
-        const isEven = idx % 2 === 0;
-        const rowBg = isEven ? WHITE : "F8F7F5";
-        row.eachCell((cell, colNumber) => {
-          cell.font = { name: "Aptos", size: 9.5, color: { argb: TEXT_DARK } };
-          cell.alignment = { vertical: "middle", wrapText: colNumber === totalCols };
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: rowBg } };
-          cell.border = {
-            bottom: { style: "thin" as const, color: { argb: "EDECEA" } },
-            left: { style: "hair" as const, color: { argb: "E8E6E1" } },
-            right: { style: "hair" as const, color: { argb: "E8E6E1" } },
-          };
-          if (colNumber === 1 && cell.value) cell.font = { name: "Aptos", size: 9.5, bold: true, color: { argb: TEXT_DARK } };
+        const ws = workbook.addWorksheet(cat.label, {
+          properties: { defaultColWidth: 18 },
+          views: [{ state: "frozen" as const, ySplit: 3 }],
         });
-        row.height = 26;
-      });
 
-      // Footer
-      const footerGap = ws.addRow([""]);
-      footerGap.height = 6;
-      const footerRowIdx = ws.rowCount + 1;
-      const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
-      const footerCell = ws.getCell(`A${footerRowIdx}`);
-      footerCell.value = { richText: [
-        { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
-        { text: `  ·  Generated: ${now.toLocaleString("en-US")}  ·  © ${now.getFullYear()} IBC STEEL GROUP`, font: { name: "Aptos", size: 8, italic: true, color: { argb: "9CA3B4" } } },
-      ] };
-      footerCell.alignment = { horizontal: "center", vertical: "middle" };
-      footerCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FAF9F7" } };
-      footerCell.border = { top: { style: "thin" as const, color: { argb: "E8E6E1" } } };
-      footerRow.height = 20;
+        const colHeaders = catIsImpo
+          ? ["Contrato China", "USD Factura", "% Depósito", "Saldo a Pagar", "Pago Colombia", "Proveedor", "Cuenta", "Numeral Cambiario", "Estado"]
+          : ["Cliente", "Descripción", "Contrato China", "USD Factura", "Depósito", "Saldo / %", "Pago Colombia", "Proveedor", "Cuenta", "Pago Cliente", "Observaciones"];
 
-      ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: totalCols } };
-      ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+        const colWidths = catIsImpo
+          ? [20, 14, 12, 14, 18, 24, 30, 16, 12]
+          : [22, 20, 20, 14, 14, 16, 18, 24, 30, 14, 24];
+
+        ws.columns = colHeaders.map((_, i) => ({ width: colWidths[i] }));
+        const totalCols = colHeaders.length;
+
+        // ROW 1: Header
+        const r1 = ws.addRow([""]);
+        ws.mergeCells(1, 1, 1, totalCols);
+        const c1 = ws.getCell("A1");
+        c1.value = { richText: [
+          { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+          { text: cat.label.toUpperCase(), font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
+          { text: `     ${dateStr}  ·  ${catPayments.length} registros`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
+        ] };
+        c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
+        c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+        r1.height = 52;
+        for (let col = 1; col <= totalCols; col++) {
+          const cell = r1.getCell(col);
+          if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+          cell.border = { bottom: { style: "medium" as const, color: { argb: WHITE } } };
+        }
+        addLogoToHeader(ws, logoId, totalCols);
+
+        // ROW 2: Spacer
+        const r2 = ws.addRow([""]);
+        ws.mergeCells(2, 1, 2, totalCols);
+        r2.height = 5;
+        for (let col = 1; col <= totalCols; col++) {
+          r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
+        }
+
+        // ROW 3: Column headers
+        const hRow = ws.addRow(colHeaders);
+        hRow.height = 32;
+        hRow.eachCell((cell) => {
+          cell.font = { name: "Aptos", size: 9, bold: true, color: { argb: WHITE } };
+          cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+          cell.border = {
+            bottom: { style: "thin" as const, color: { argb: WHITE } },
+            left: { style: "thin" as const, color: { argb: "2D5A8A" } },
+            right: { style: "thin" as const, color: { argb: "2D5A8A" } },
+            top: { style: "thin" as const, color: { argb: "2D5A8A" } },
+          };
+        });
+
+        // DATA ROWS
+        catPayments.forEach((p, idx) => {
+          const values = catIsImpo
+            ? [p.china_sales_contract || "", fmtNum(p.usd_invoice), p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "", fmtNum(p.balance_to_pay), p.payment_colombia || "", p.suppliers?.name || "", p.account_info || "", p.numeral_cambiario || "", STATUS_CFG[p.status]?.label || p.status]
+            : [p.client || "", p.description || "", p.china_sales_contract || "", fmtNum(p.usd_invoice), fmtNum(p.deposit), p.balance_to_pay != null ? fmtNum(p.balance_to_pay) : p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "", p.payment_colombia || "", p.suppliers?.name || "", p.account_info || "", fmtNum(p.client_payment), p.remarks || ""];
+
+          const row = ws.addRow(values);
+          const isEven = idx % 2 === 0;
+          const rowBg = isEven ? WHITE : "F8F7F5";
+          row.eachCell((cell, colNumber) => {
+            cell.font = { name: "Aptos", size: 9.5, color: { argb: TEXT_DARK } };
+            cell.alignment = { vertical: "middle", wrapText: colNumber === totalCols };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: rowBg } };
+            cell.border = {
+              bottom: { style: "thin" as const, color: { argb: "EDECEA" } },
+              left: { style: "hair" as const, color: { argb: "E8E6E1" } },
+              right: { style: "hair" as const, color: { argb: "E8E6E1" } },
+            };
+            if (colNumber === 1 && cell.value) cell.font = { name: "Aptos", size: 9.5, bold: true, color: { argb: TEXT_DARK } };
+          });
+          row.height = 26;
+        });
+
+        // Footer
+        const footerGap = ws.addRow([""]);
+        footerGap.height = 6;
+        const footerRowIdx = ws.rowCount + 1;
+        const footerRow = ws.addRow([""]);
+        ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
+        const footerCell = ws.getCell(`A${footerRowIdx}`);
+        footerCell.value = { richText: [
+          { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
+          { text: `  ·  Generated: ${now.toLocaleString("en-US")}  ·  © ${now.getFullYear()} IBC STEEL GROUP`, font: { name: "Aptos", size: 8, italic: true, color: { argb: "9CA3B4" } } },
+        ] };
+        footerCell.alignment = { horizontal: "center", vertical: "middle" };
+        footerCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FAF9F7" } };
+        footerCell.border = { top: { style: "thin" as const, color: { argb: "E8E6E1" } } };
+        footerRow.height = 20;
+
+        ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: totalCols } };
+        ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+      }
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `IBC_${catLabel.replace(/\s+/g, "_")}_${now.toISOString().slice(0, 10)}.xlsx`;
+      link.download = `IBC_Reporte_Pagos_Completo_${now.toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast.success("Reporte descargado exitosamente");
+      toast.success("Reporte completo descargado — 4 pestañas");
     } catch (error) {
       console.error("Error generating Excel:", error);
       toast.error("Error al generar el reporte");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // PDF Export
+  // ---------------------------------------------------------------------------
+
+  const handlePDF = async () => {
+    try {
+      toast.info("Generando PDF...");
+      const catLabel = CATEGORIES.find((c) => c.key === activeCategory)?.label || activeCategory;
+      if (isImpo) {
+        await generatePDFReport({
+          title: `PAGOS — ${catLabel.toUpperCase()}`,
+          subtitle: catLabel,
+          filename: `IBC_Pagos_${activeCategory}`,
+          recordLabel: "registros",
+          orientation: "landscape",
+          columns: [
+            { header: "CONTRATO", dataKey: "contrato", width: 1.2, bold: true, color: "#1E3A5F" },
+            { header: "USD FACTURA", dataKey: "usd", width: 1, halign: "right" },
+            { header: "% DEP.", dataKey: "dep", width: 0.6, halign: "center" },
+            { header: "SALDO", dataKey: "saldo", width: 1, halign: "right" },
+            { header: "PAGO COL", dataKey: "pago_col", width: 1 },
+            { header: "PROVEEDOR", dataKey: "proveedor", width: 1.2 },
+            { header: "NUMERAL", dataKey: "numeral", width: 1 },
+            { header: "ESTADO", dataKey: "estado", width: 0.8, halign: "center" },
+          ],
+          data: filtered.map((p) => ({
+            contrato: p.china_sales_contract || "",
+            usd: fmtNum(p.usd_invoice),
+            dep: p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "",
+            saldo: fmtNum(p.balance_to_pay),
+            pago_col: p.payment_colombia || "",
+            proveedor: p.suppliers?.name || "",
+            numeral: p.numeral_cambiario || "",
+            estado: STATUS_CFG[p.status]?.label || p.status,
+          })),
+        });
+      } else {
+        await generatePDFReport({
+          title: `PAGOS — ${catLabel.toUpperCase()}`,
+          subtitle: catLabel,
+          filename: `IBC_Pagos_${activeCategory}`,
+          recordLabel: "registros",
+          orientation: "landscape",
+          columns: [
+            { header: "CLIENTE", dataKey: "cliente", width: 1.3, bold: true },
+            { header: "DESCRIPCIÓN", dataKey: "desc", width: 1.5 },
+            { header: "CONTRATO", dataKey: "contrato", width: 1, color: "#1E3A5F" },
+            { header: "USD FACT.", dataKey: "usd", width: 0.9, halign: "right" },
+            { header: "DEPÓSITO", dataKey: "deposito", width: 0.8, halign: "right" },
+            { header: "SALDO/%", dataKey: "saldo", width: 0.8, halign: "right" },
+            { header: "PROVEEDOR", dataKey: "proveedor", width: 1.1 },
+            { header: "PAGO CLI.", dataKey: "pago_cli", width: 0.8, halign: "right" },
+            { header: "OBSERVACIONES", dataKey: "obs", width: 1.5 },
+          ],
+          data: filtered.map((p) => ({
+            cliente: p.client || "",
+            desc: p.description || "",
+            contrato: p.china_sales_contract || "",
+            usd: fmtNum(p.usd_invoice),
+            deposito: fmtNum(p.deposit),
+            saldo: p.balance_to_pay != null ? fmtNum(p.balance_to_pay) : p.deposit_percentage != null ? `${(p.deposit_percentage * 100).toFixed(0)}%` : "",
+            proveedor: p.suppliers?.name || "",
+            pago_cli: fmtNum(p.client_payment),
+            obs: p.remarks || "",
+          })),
+        });
+      }
+      toast.success("PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el PDF");
     }
   };
 
@@ -227,6 +308,9 @@ export default function PaymentsReportPage() {
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl border-slate-200" onClick={fetchData}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </Button>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50" variant="outline" onClick={handlePDF}>
+            <FileDown className="w-3.5 h-3.5" /> Export PDF
           </Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25" onClick={handleExport}>
             <Download className="w-3.5 h-3.5" /> Export Excel

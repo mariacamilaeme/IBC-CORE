@@ -11,49 +11,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
-// ─── DESIGN TOKENS ───────────────────────────────────────────
-const T = {
-  bg: "#F5F3EF",
-  surface: "#FFFFFF",
-  surfaceHover: "#FCFBF9",
-  surfaceAlt: "#FAF9F7",
-  ink: "#18191D",
-  inkSoft: "#3D4049",
-  inkMuted: "#6B7080",
-  inkLight: "#9CA3B4",
-  inkGhost: "#C5CAD5",
-  accent: "#0B5394",
-  accentLight: "#E8F0FE",
-  accentDark: "#083D6E",
-  accentVivid: "#1A6FD1",
-  success: "#0D9F6E",
-  successSoft: "#D1FAE5",
-  successBg: "#ECFDF3",
-  warning: "#DC8B0B",
-  warningBg: "#FFF8EB",
-  warningSoft: "#FEF3C7",
-  danger: "#E63946",
-  dangerBg: "#FFF1F2",
-  dangerSoft: "#FECDD3",
-  blue: "#3B82F6",
-  blueBg: "#EFF6FF",
-  violet: "#7C5CFC",
-  violetBg: "#F3F0FF",
-  teal: "#0EA5A5",
-  tealBg: "#EDFCFC",
-  orange: "#F97316",
-  orangeBg: "#FFF7ED",
-  border: "#E8E6E1",
-  borderLight: "#F0EDE8",
-  borderFocus: "#0B539444",
-  shadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
-  shadowMd: "0 2px 4px rgba(26,29,35,0.04), 0 8px 20px rgba(26,29,35,0.05)",
-  shadowLg: "0 4px 8px rgba(26,29,35,0.04), 0 16px 40px rgba(26,29,35,0.07)",
-  radius: "18px",
-  radiusMd: "14px",
-  radiusSm: "10px",
-  radiusXs: "6px",
-};
+import { T } from "@/lib/design-tokens";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -146,6 +104,7 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
     const start = ref.current;
     const diff = value - start;
     if (diff === 0) return;
+    let rafId: number;
     const duration = 800;
     const startTime = performance.now();
     const step = (now: number) => {
@@ -154,10 +113,11 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
       const eased = 1 - Math.pow(1 - progress, 3);
       const current = Math.round(start + diff * eased);
       setDisplay(current);
-      if (progress < 1) requestAnimationFrame(step);
+      if (progress < 1) rafId = requestAnimationFrame(step);
       else ref.current = value;
     };
-    requestAnimationFrame(step);
+    rafId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafId);
   }, [value]);
 
   return <>{prefix}{display.toLocaleString("es-CO")}{suffix}</>;

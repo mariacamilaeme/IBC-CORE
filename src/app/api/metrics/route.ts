@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest) {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("*")
+      .select("role, full_name")
       .eq("id", user.id)
       .single();
 
@@ -59,11 +59,13 @@ export async function GET(_request: NextRequest) {
       supabase
         .from("contracts")
         .select("status, tons_agreed, tons_shipped, commercial_name, country")
-        .eq("is_active", true),
+        .eq("is_active", true)
+        .limit(5000),
       supabase
         .from("contract_invoices")
         .select("china_invoice_value, customer_invoice_value, approved")
-        .eq("is_active", true),
+        .eq("is_active", true)
+        .limit(5000),
       supabase
         .from("contracts")
         .select("id, client_name, client_contract, commercial_name, vessel_name, eta_final, bl_number, country, status")
@@ -206,7 +208,7 @@ export async function GET(_request: NextRequest) {
       upcoming_etas: upcomingEtasResult.data ?? [],
       pending_china_invoices: pendingChinaInvoicesResult.data ?? [],
       pending_reminders: remindersResult.data ?? [],
-      recent_activity: recentActivityResult.data ?? [],
+      recent_activity: (profile.role === "admin" || profile.role === "directora") ? (recentActivityResult.data ?? []) : [],
       filters: {
         role: profile.role,
       },

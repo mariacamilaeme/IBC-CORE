@@ -39,17 +39,6 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Add any route protection logic here. For example:
-  // if (
-  //   !user &&
-  //   !request.nextUrl.pathname.startsWith('/login') &&
-  //   !request.nextUrl.pathname.startsWith('/auth')
-  // ) {
-  //   const url = request.nextUrl.clone();
-  //   url.pathname = '/login';
-  //   return NextResponse.redirect(url);
-  // }
-
   // IMPORTANT: You *must* return the supabaseResponse object as-is.
   // If you create a new response with NextResponse.next(), make sure to:
   // 1. Pass the request: NextResponse.next({ request })
@@ -57,5 +46,5 @@ export async function updateSession(request: NextRequest) {
   // Failing to do so will cause the browser and server to go out of sync
   // and terminate the user's session prematurely.
 
-  return supabaseResponse;
+  return { response: supabaseResponse, user };
 }

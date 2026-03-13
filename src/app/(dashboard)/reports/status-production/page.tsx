@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { Download, Loader2, Factory, RefreshCw } from "lucide-react";
+import { Download, Loader2, Factory, RefreshCw, FileDown } from "lucide-react";
+import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { generatePDFReport } from "@/lib/pdf-report";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -148,6 +150,7 @@ export default function StatusProductionPage() {
       const ACCENT_GOLD = "C9A227";
       const WHITE = "FFFFFF";
       const TEXT_DARK = "1A202C";
+      const logoId = await addLogoToWorkbook(workbook);
 
       ws.columns = [
         { key: "client_name", width: 28 },
@@ -175,19 +178,19 @@ export default function StatusProductionPage() {
       ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
-        { text: "IBC", font: { name: "Aptos", size: 16, bold: true, color: { argb: WHITE } } },
-        { text: "  STEEL GROUP", font: { name: "Aptos", size: 12, color: { argb: "FFFFFF" } } },
-        { text: `          STATUS PRODUCTION`, font: { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } } },
+        { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
+        { text: "STATUS PRODUCTION", font: { name: "Aptos", size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${contracts.length} contracts`, font: { name: "Aptos", size: 9, color: { argb: "D0DCE8" } } },
       ] };
-      c1.alignment = { horizontal: "left", vertical: "middle", indent: 2 };
+      c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
-      r1.height = 40;
+      r1.height = 52;
       for (let col = 1; col <= totalCols; col++) {
         const cell = r1.getCell(col);
         if (col > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
         cell.border = { bottom: { style: "medium" as const, color: { argb: "FFFFFF" } } };
       }
+      addLogoToHeader(ws, logoId, totalCols);
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
@@ -387,6 +390,52 @@ export default function StatusProductionPage() {
   const productionCount = contracts.length;
 
   // ---------------------------------------------------------------------------
+  // PDF Export
+  // ---------------------------------------------------------------------------
+
+  const handlePDF = async () => {
+    try {
+      toast.info("Generando PDF...");
+      await generatePDFReport({
+        title: "STATUS PRODUCTION",
+        subtitle: "Contracts in production",
+        filename: "STATUS_PRODUCTION",
+        recordLabel: "contracts",
+        orientation: "landscape",
+        columns: [
+          { header: "CUSTOMER", dataKey: "customer", width: 1.3, bold: true },
+          { header: "CUSTOMER CONTRACT", dataKey: "customer_contract", width: 1.1, bold: true, color: "#1E3A5F" },
+          { header: "CHINA CONTRACT", dataKey: "china_contract", width: 1.1, bold: true, color: "#1E3A5F" },
+          { header: "INCOTERM", dataKey: "incoterm", width: 0.6, halign: "center" },
+          { header: "DETAIL", dataKey: "detail", width: 2 },
+          { header: "EXW", dataKey: "exw", width: 0.8, halign: "center" },
+          { header: "VESSEL NAME", dataKey: "vessel", width: 1.1 },
+          { header: "EST. DEPARTURE", dataKey: "departure", width: 0.9, halign: "center" },
+          { header: "ADDITIONAL NOTES", dataKey: "notes", width: 1.5 },
+        ],
+        data: contracts.map((c) => {
+          const manual = manualData[c.id || ""] || { vessel_name: "", estimated_departure: "", additional_notes: "" };
+          return {
+            customer: c.client_name || "",
+            customer_contract: c.client_contract || "",
+            china_contract: c.china_contract || "",
+            incoterm: c.incoterm || "",
+            detail: c.detail || "",
+            exw: fmtDate(c.exw_date),
+            vessel: manual.vessel_name || c.vessel_name || "",
+            departure: manual.estimated_departure ? fmtDate(manual.estimated_departure) : "",
+            notes: manual.additional_notes || "",
+          };
+        }),
+      });
+      toast.success("PDF descargado exitosamente");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Error al generar el PDF");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -423,6 +472,16 @@ export default function StatusProductionPage() {
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh
+          </Button>
+
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+            variant="outline"
+            onClick={handlePDF}
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            Export PDF
           </Button>
 
           <Button
