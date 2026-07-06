@@ -36,6 +36,7 @@ import {
   DollarSign,
   Trash2,
   Send,
+  FileOutput,
 } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -727,6 +728,7 @@ export default function ClientsPage() {
       tags: null,
       additional_contacts: [],
       shipping_addresses: [],
+      document_info: { messrs: "", nit: "", address: "", country_city: "" },
     };
   }
 
@@ -984,7 +986,6 @@ export default function ClientsPage() {
 
       // ROW 1: Unified header
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
@@ -1004,7 +1005,6 @@ export default function ClientsPage() {
 
       // ROW 2: Spacer
       const r2x = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
       r2x.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2x.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -1088,7 +1088,7 @@ export default function ClientsPage() {
 
           // Credit limit
           if (colNumber === 15 && typeof cell.value === "number") {
-            cell.numFmt = '"$"#,##0.00';
+            cell.numFmt = '"USD "#,##0.00';
             cell.alignment = { horizontal: "right", vertical: "middle" };
           }
 
@@ -1123,7 +1123,6 @@ export default function ClientsPage() {
 
       const footerRowIdx = ws.rowCount + 1;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
       const footerCell = ws.getCell(`A${footerRowIdx}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -1175,6 +1174,14 @@ export default function ClientsPage() {
   // Render
   // =====================================================
   return (
+    <div style={{
+      background: T.glassBg,
+      backdropFilter: T.glassBlur,
+      border: `1px solid ${T.glassBorder}`,
+      borderRadius: T.radius,
+      boxShadow: T.shadowGlass,
+      padding: 28,
+    }}>
     <div style={{ fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif", width: "100%", transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)" }}>
 
       {/* Global keyframes */}
@@ -1196,15 +1203,18 @@ export default function ClientsPage() {
       {/* Header Banner */}
       <div style={{
         position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: "0 4px 24px rgba(11,83,148,0.18)",
         animation: "cFadeIn 0.4s ease both",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1229,7 +1239,7 @@ export default function ClientsPage() {
               onClick={handleDownloadExcel}
               disabled={downloading}
               style={{
-                padding: "7px 14px", borderRadius: 8,
+                padding: "7px 14px", borderRadius: T.radiusSm,
                 border: "1px solid rgba(255,255,255,0.2)",
                 background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)",
                 color: "#fff", fontWeight: 600, fontSize: 12,
@@ -1246,15 +1256,15 @@ export default function ClientsPage() {
             <button
               onClick={handleNewClient}
               style={{
-                padding: "7px 16px", borderRadius: 8, border: "none",
-                background: "#fff", color: "#1E3A5F", fontWeight: 700, fontSize: 12,
+                padding: "7px 16px", borderRadius: T.radiusSm, border: "none",
+                background: "#fff", color: T.accent, fontWeight: 700, fontSize: 12,
                 cursor: "pointer", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
                 display: "flex", alignItems: "center", gap: 5,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                boxShadow: T.shadowMd,
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(11,83,148,0.15)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowMd; }}
             >{I.plus} Nuevo Cliente</button>
           </div>
         </div>
@@ -1551,10 +1561,11 @@ export default function ClientsPage() {
             </div>
             {!hasActiveFilters && (
               <button onClick={handleNewClient} style={{
-                marginTop: 16, padding: "8px 18px", borderRadius: 10, border: "none",
-                background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13,
+                marginTop: 16, padding: "8px 18px", borderRadius: T.radiusSm, border: "none",
+                background: T.gradientPrimary, color: "#fff", fontWeight: 700, fontSize: 13,
                 cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
                 fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
+                boxShadow: T.shadowMd,
               }}>{I.plus} Nuevo Cliente</button>
             )}
           </div>
@@ -1579,14 +1590,14 @@ export default function ClientsPage() {
                     key={client.id}
                     onClick={() => handleViewClient(client)}
                     style={{
-                      background: T.surface, borderRadius: T.radius,
-                      border: `1px solid ${T.borderLight}`, boxShadow: T.shadow,
+                      background: T.glassBg, borderRadius: T.radius,
+                      border: `1px solid ${T.glassBorder}`, boxShadow: T.shadowGlass,
                       cursor: "pointer", overflow: "hidden", position: "relative",
                       animation: `cFadeUp 0.4s cubic-bezier(0.4,0,0.2,1) ${400 + idx * 40}ms both`,
                       transition: "all 0.35s cubic-bezier(0.4, 0, 0.2, 1)",
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = `0 8px 32px ${avatarColor}12, 0 2px 8px rgba(26,29,35,0.04)`; e.currentTarget.style.borderColor = avatarColor + "30"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadow; e.currentTarget.style.borderColor = T.borderLight; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = `0 8px 32px ${avatarColor}12, 0 2px 8px rgba(11,83,148,0.04)`; e.currentTarget.style.borderColor = avatarColor + "30"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowGlass; e.currentTarget.style.borderColor = T.glassBorder; }}
                   >
                     {/* Top accent line */}
                     <div style={{ height: 3, width: "100%", background: `linear-gradient(90deg, ${avatarColor}, ${avatarColor}88, transparent)`, opacity: 0.6, transition: "opacity 0.3s" }} />
@@ -1794,7 +1805,7 @@ export default function ClientsPage() {
             position: "relative", width: "100%", maxWidth: 720, maxHeight: "90vh",
             display: "flex", flexDirection: "column", borderRadius: 22,
             border: `1px solid ${T.borderLight}`, background: "rgba(255,255,255,0.92)",
-            backdropFilter: "blur(24px)", boxShadow: "0 32px 64px -12px rgba(0,0,0,0.25)",
+            backdropFilter: "blur(24px)", boxShadow: "0 32px 64px -12px rgba(11,83,148,0.2)",
             animation: "cFadeUp 0.35s ease both", overflow: "hidden",
           }}>
             {/* Accent bar */}
@@ -1891,6 +1902,10 @@ export default function ClientsPage() {
                     <TabsTrigger value="financial" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
                       <CreditCard className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">Financiera</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="documents" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
+                      <FileOutput className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Documentos</span>
                     </TabsTrigger>
                   </TabsList>
 
@@ -2269,7 +2284,7 @@ export default function ClientsPage() {
                           </div>
                           <ReadOnlyField label="Condiciones de Pago" value={formData.payment_terms} icon={CreditCard} accent="amber" />
                           <div className="grid grid-cols-2 gap-3">
-                            <ReadOnlyField label="Límite de Crédito" value={formData.credit_limit != null ? `$${Number(formData.credit_limit).toLocaleString("es-CO", { minimumFractionDigits: 2 })}` : null} icon={DollarSign} accent="emerald" />
+                            <ReadOnlyField label="Límite de Crédito" value={formData.credit_limit != null ? `USD ${Number(formData.credit_limit).toLocaleString("es-CO", { minimumFractionDigits: 2 })}` : null} icon={DollarSign} accent="emerald" />
                             <ReadOnlyField label="Moneda Preferida" value={formData.preferred_currency} icon={DollarSign} accent="emerald" />
                           </div>
                         </div>
@@ -2307,6 +2322,76 @@ export default function ClientsPage() {
                             </Select>
                           </div>
                         </div>
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* ---- Tab: Documentos ---- */}
+                  <TabsContent value="documents" className="space-y-5">
+                    {viewMode ? (
+                      <div className="space-y-5">
+                        <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="h-6 w-1 rounded-full bg-gradient-to-b from-cyan-500 to-cyan-600" />
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Información para Documentos Comerciales</h4>
+                          </div>
+                          <p className="text-xs text-slate-400 mb-2">Estos datos se usan en facturas y listas de empaque generadas desde el módulo Generador de Documentos.</p>
+                          <ReadOnlyField label="Messrs" value={(formData.document_info as any)?.messrs} icon={Building2} accent="blue" />
+                          <ReadOnlyField label="NIT" value={(formData.document_info as any)?.nit} icon={Hash} accent="blue" />
+                          <ReadOnlyField label="Address" value={(formData.document_info as any)?.address} icon={MapPin} accent="blue" />
+                          <ReadOnlyField label="Country - City" value={(formData.document_info as any)?.country_city} icon={Globe} accent="blue" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="h-5 w-1 rounded-full bg-gradient-to-b from-cyan-500 to-cyan-600" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Información para Documentos Comerciales</h4>
+                        </div>
+                        <p className="text-xs text-slate-400 -mt-2">Estos datos aparecen en el encabezado de facturas y listas de empaque generadas.</p>
+                        {(() => {
+                          const docInfo = (formData.document_info as any) || {};
+                          const updateDocInfo = (field: string, value: string) => {
+                            updateFormField("document_info" as any, { ...docInfo, [field]: value });
+                          };
+                          return (
+                            <>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-slate-600">Messrs</Label>
+                                <Input value={docInfo.messrs || ""} onChange={(e) => updateDocInfo("messrs", e.target.value)} placeholder={formData.company_name || "Razón social / Nombre del cliente"} className="rounded-lg" />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-slate-600">NIT</Label>
+                                <Input value={docInfo.nit || ""} onChange={(e) => updateDocInfo("nit", e.target.value)} placeholder={formData.tax_id || "NIT o ID tributario"} className="rounded-lg" />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-slate-600">Address</Label>
+                                <Input value={docInfo.address || ""} onChange={(e) => updateDocInfo("address", e.target.value)} placeholder={formData.address || "Dirección completa"} className="rounded-lg" />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold text-slate-600">Country - City</Label>
+                                <Input value={docInfo.country_city || ""} onChange={(e) => updateDocInfo("country_city", e.target.value)} placeholder={formData.country && formData.city ? `${formData.country} - ${formData.city}` : "País - Ciudad"} className="rounded-lg" />
+                              </div>
+                              {!docInfo.messrs && !docInfo.nit && !docInfo.address && !docInfo.country_city && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    updateFormField("document_info" as any, {
+                                      messrs: formData.company_name || "",
+                                      nit: formData.tax_id || "",
+                                      address: formData.address || "",
+                                      country_city: formData.country && formData.city ? `${formData.country} - ${formData.city}` : "",
+                                    });
+                                  }}
+                                  className="text-xs text-cyan-600 hover:text-cyan-700 font-semibold flex items-center gap-1.5 mt-1"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  Auto-completar desde datos del cliente
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                   </TabsContent>
@@ -2356,12 +2441,12 @@ export default function ClientsPage() {
                     onClick={handleSubmit}
                     disabled={submitting}
                     style={{
-                      padding: "8px 18px", borderRadius: 10, border: "none",
-                      background: T.accent, color: "#fff", fontSize: 13, fontWeight: 700,
+                      padding: "8px 18px", borderRadius: T.radiusSm, border: "none",
+                      background: T.gradientPrimary, color: "#fff", fontSize: 13, fontWeight: 700,
                       cursor: submitting ? "wait" : "pointer",
                       display: "flex", alignItems: "center", gap: 6,
                       fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
-                      boxShadow: `0 2px 8px ${T.accent}30`, opacity: submitting ? 0.7 : 1,
+                      boxShadow: T.shadowMd, opacity: submitting ? 0.7 : 1,
                     }}
                   >
                     {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -2421,6 +2506,7 @@ export default function ClientsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
     </div>
   );
 }

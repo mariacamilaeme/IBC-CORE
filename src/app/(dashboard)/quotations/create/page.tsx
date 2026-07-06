@@ -11,6 +11,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -140,12 +141,12 @@ export default function CreatePage() {
       {/* HEADER */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E3A5F]">Generar Cotización</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink, letterSpacing: "-0.3px" }}>Generar Cotización</h1>
+          <p style={{ color: T.inkMuted }} className="text-sm mt-1">
             Crea nuevas cotizaciones que alimentarán la trazabilidad y los reportes
           </p>
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 rounded-xl border border-blue-100">
+        <div className="flex items-center gap-2 px-4 py-2 rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <FileText className="w-4 h-4 text-blue-600" />
           <span className="text-sm font-medium text-blue-700">{customQuotations.length}</span>
           <span className="text-xs text-blue-500">cotizaciones creadas</span>
@@ -153,9 +154,9 @@ export default function CreatePage() {
       </div>
 
       {/* CREATION FORM */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="rounded-2xl overflow-hidden" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
         {/* Gradient header */}
-        <div className="bg-gradient-to-r from-[#1E3A5F] via-[#2A4D7A] to-[#1E3A5F] px-6 py-4">
+        <div className="px-6 py-4" style={{ background: T.gradientPrimary }}>
           <div className="flex items-center gap-2">
             <Plus className="w-5 h-5 text-white" />
             <h2 className="text-base font-bold text-white">Nueva Cotización</h2>
@@ -299,11 +300,12 @@ export default function CreatePage() {
               type="submit"
               disabled={!isValid || saved}
               className={cn(
-                "gap-2 rounded-xl font-semibold transition-all duration-200",
+                "gap-2 rounded-xl font-semibold transition-all duration-200 text-white",
                 saved
-                  ? "bg-emerald-600 hover:bg-emerald-600 text-white"
-                  : "bg-[#1E3A5F] hover:bg-[#2A4D7A] text-white shadow-lg shadow-[#1E3A5F]/20 hover:scale-[1.02]"
+                  ? "bg-emerald-600 hover:bg-emerald-600"
+                  : "hover:scale-[1.02]"
               )}
+              style={saved ? {} : { background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
             >
               {saved ? (
                 <>
@@ -327,9 +329,9 @@ export default function CreatePage() {
 
       {/* CREATED QUOTATIONS TABLE */}
       {customQuotations.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200">
-            <h2 className="text-base font-bold text-[#1E3A5F]">Cotizaciones Creadas</h2>
+        <div className="rounded-2xl overflow-hidden" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
+          <div className="px-6 py-4" style={{ borderBottom: "1px solid " + T.glassBorder }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: T.ink }}>Cotizaciones Creadas</h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Cotizaciones registradas por ti — también visibles en Trazabilidad y Reportes
             </p>

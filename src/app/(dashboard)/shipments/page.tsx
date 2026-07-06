@@ -1,11 +1,12 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { format } from "date-fns";
+import { format, differenceInCalendarDays, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   Plus,
@@ -31,6 +32,9 @@ import {
   Building2,
   ClipboardCheck,
   ChevronDown,
+  Pencil,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -96,6 +100,7 @@ import Link from "next/link";
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────
 import { T } from "@/lib/design-tokens";
+import { getDirectContainerTrackingUrl, getDirectVesselTrackingUrl } from "@/lib/shipping-tracking";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -170,7 +175,7 @@ function AnimCurrency({ value }: { value: number }) {
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
   }, [value]);
-  return <>US$ {display.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</>;
+  return <>USD {display.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>;
 }
 
 // =====================================================
@@ -235,7 +240,15 @@ const CONTRACT_STATUS_DOT_COLORS: Record<string, string> = {
   "PENDIENTE ANTICIPO": "bg-slate-400",
 };
 
-type VesselFilterType = "all" | "en_transito" | "pendiente_embarque" | "saldo_pendiente" | "bl_pendientes";
+type VesselFilterType = "all" | "en_transito" | "pendiente_embarque" | "saldo_pendiente" | "bl_pendientes" | "por_actualizar";
+
+// Ventana de "llegada inminente": si la ETA cae dentro de estos días,
+// conviene verificar el tracking para confirmar la llegada.
+const ETA_SOON_DAYS = 3;
+
+// Señal derivada de las propias fechas del contrato — se limpia sola cuando
+// la usuaria corrige la fecha en su Excel y lo importa.
+type VesselUpdateSignal = { reason: string; severity: "danger" | "warning" } | null;
 
 // =====================================================
 // Zod Schema
@@ -277,6 +290,160 @@ const shipmentFormSchema = z.object({
 type ShipmentFormValues = z.infer<typeof shipmentFormSchema>;
 
 // =====================================================
+// Floating Contract Window — panel flotante y arrastrable
+// para consultar contratos sin salir de la pantalla.
+// =====================================================
+
+function FRow({ label, value, strong, color }: { label: string; value: React.ReactNode; strong?: boolean; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, lineHeight: 1.45 }}>
+      <span style={{ color: T.inkLight, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: color || (strong ? T.ink : T.inkSoft), fontWeight: strong ? 700 : 500, textAlign: "right", wordBreak: "break-word" }}>
+        {value || "—"}
+      </span>
+    </div>
+  );
+}
+
+function ContractSplitPanel({ contract: c, onClose }: { contract: Contract; onClose: () => void }) {
+  const fmtD = (d: string | null | undefined) => (d ? formatDate(d) : "—");
+
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>{title}</p>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: "relative", height: "100%", minWidth: 0,
+      display: "flex", flexDirection: "column", borderRadius: 22,
+      border: `1px solid ${T.borderLight}`, background: "rgba(255,255,255,0.96)",
+      backdropFilter: "blur(24px)", boxShadow: "0 32px 64px -12px rgba(11,83,148,0.18)",
+      overflow: "hidden", animation: "sFadeUp 0.3s ease both",
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "14px 20px", background: T.gradientPrimary, flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <FileText style={{ width: 16, height: 16, color: "rgba(255,255,255,0.85)", flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", fontFamily: "var(--font-jetbrains-mono), monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {c.client_contract || c.china_contract || "Contrato"}
+            </div>
+            <div style={{ fontSize: 11.5, color: "rgba(207,224,240,0.9)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {c.client_name || "—"}
+              {c.country && COUNTRY_FLAGS[c.country.toUpperCase()] && <span style={{ marginLeft: 6 }}>{COUNTRY_FLAGS[c.country.toUpperCase()]}</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px] font-semibold gap-1.5 rounded-lg px-2.5 py-1 shrink-0 bg-white/90",
+              CONTRACT_STATUS_COLORS[c.status || ""] || "bg-gray-100 text-gray-800 border-gray-200"
+            )}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full inline-block", CONTRACT_STATUS_DOT_COLORS[c.status || ""] || "bg-slate-400")} />
+            {CONTRACT_STATUS_LABELS[c.status || ""] || c.status || "—"}
+          </Badge>
+          <button
+            onClick={onClose}
+            title="Cerrar panel de contrato"
+            style={{
+              width: 28, height: 28, borderRadius: 8, border: "none",
+              background: "rgba(255,255,255,0.16)", color: "#fff", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
+      </div>
+
+      {/* Contenido — grid adaptable con información completa */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 22px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "18px 28px" }}>
+          <Section title="General">
+            <FRow label="Contrato Cliente" value={c.client_contract} strong />
+            <FRow label="Contrato China" value={c.china_contract} />
+            <FRow label="Comercial" value={c.commercial_name} />
+            <FRow label="País" value={c.country} />
+            <FRow label="Incoterm" value={c.incoterm} />
+            <FRow label="Producto" value={c.detail} />
+            <FRow label="Tipo" value={c.product_type} />
+            <FRow label="Mes emisión" value={c.issue_month} />
+          </Section>
+
+          <Section title="Toneladas">
+            <FRow label="Tons acordadas" value={c.tons_agreed != null ? `${formatNumber(c.tons_agreed)} t` : "—"} />
+            <FRow label="MT Shipped" value={c.tons_shipped != null ? `${formatNumber(c.tons_shipped)} t` : "—"} />
+            <FRow label="Diferencia" value={c.tons_difference != null ? `${formatNumber(c.tons_difference)} t` : "—"} color={(c.tons_difference ?? 0) < 0 ? T.danger : undefined} />
+            <FRow label="Cumplimiento" value={c.tons_compliance} />
+          </Section>
+
+          <Section title="Fechas">
+            <FRow label="Contrato" value={fmtD(c.contract_date)} />
+            <FRow label="Pago anticipo" value={fmtD(c.advance_payment_date)} />
+            <FRow label="Entrega PCC" value={fmtD(c.delivery_date_pcc)} />
+            <FRow label="EXW" value={fmtD(c.exw_date)} />
+            <FRow label="ETD" value={fmtD(c.etd)} />
+            <FRow label="ETA Inicial" value={fmtD(c.eta_initial)} />
+            <FRow label="ETA Final" value={fmtD(c.eta_final)} strong />
+            <FRow label="Dif. días" value={c.days_difference != null ? `${c.days_difference}` : "—"} color={(c.days_difference ?? 0) > 0 ? T.danger : undefined} />
+            <FRow label="T. producción" value={c.production_time_days != null ? `${c.production_time_days} días` : "—"} />
+            <FRow label="Cumplim. EXW" value={c.exw_compliance} />
+          </Section>
+
+          <Section title="Embarque">
+            <FRow label="Motonave" value={c.vessel_name} strong />
+            <FRow label="Naviera" value={c.shipping_company} />
+            <FRow label="N° BL" value={c.bl_number} />
+            <FRow label="Puerto arribo" value={c.arrival_port} />
+            <FRow label="Tipo embarque" value={c.shipment_type} />
+            <FRow
+              label="Liberación BL"
+              value={c.bl_released === "SI" ? "Liberado" : "Pendiente"}
+              color={c.bl_released === "SI" ? T.success : T.danger}
+              strong
+            />
+          </Section>
+
+          <Section title="Pagos">
+            <FRow label="Pago anticipo" value={c.advance_paid} />
+            <FRow label="Pago saldo" value={c.balance_paid} color={c.balance_paid === "PENDIENTE" ? T.warning : undefined} />
+            <FRow
+              label="Valor pendiente"
+              value={(c.pending_client_amount ?? 0) > 0 ? formatCurrency(c.pending_client_amount!) : "Pagado"}
+              color={(c.pending_client_amount ?? 0) > 0 ? T.danger : T.success}
+              strong
+            />
+          </Section>
+
+          <Section title="Documentos">
+            <FRow label="Enviados" value={c.documents_sent} />
+            <FRow label="Pendientes" value={c.documents_pending} color={c.documents_pending ? T.danger : undefined} />
+            <FRow label="Físicos" value={c.physical_docs_sent} />
+          </Section>
+        </div>
+
+        {/* Notas — ancho completo */}
+        {c.notes && (
+          <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>Observaciones</p>
+            <p style={{ fontSize: 12.5, color: T.inkSoft, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{c.notes}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =====================================================
 // Main Page Component
 // =====================================================
 
@@ -314,6 +481,11 @@ export default function ShipmentsPage() {
   const [newVesselShippingLine, setNewVesselShippingLine] = useState("");
   const [creatingVessel, setCreatingVessel] = useState(false);
 
+  // Year filter
+  const [selectedYears, setSelectedYears] = useState<string[]>([]);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
+
   // Vessel detail dialog state
   const [vesselDetailOpen, setVesselDetailOpen] = useState(false);
   const [vesselDetailData, setVesselDetailData] = useState<{ name: string; contracts: Contract[] } | null>(null);
@@ -339,6 +511,20 @@ export default function ShipmentsPage() {
   const [vfPanelSearch, setVfPanelSearch] = useState("");
   const [vfEtaExpanded, setVfEtaExpanded] = useState<Set<string>>(new Set());
   const [vesselSearch, setVesselSearch] = useState("");
+
+  // Inline ETD/ETA quick-edit state
+  const [editingDateContractId, setEditingDateContractId] = useState<string | null>(null);
+  const [editingDateField, setEditingDateField] = useState<"etd" | "eta_final" | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState("");
+  const [savingDate, setSavingDate] = useState(false);
+
+  // Vessel-level date editing state
+  const [vesselDateEditing, setVesselDateEditing] = useState(false);
+  const [vesselDateEtd, setVesselDateEtd] = useState("");
+  const [vesselDateEtaInitial, setVesselDateEtaInitial] = useState("");
+  const [vesselDateEtaFinal, setVesselDateEtaFinal] = useState("");
+  const [vesselDateStatus, setVesselDateStatus] = useState("");
+  const [vesselDateSaving, setVesselDateSaving] = useState(false);
 
   // =====================================================
   // Data Fetching
@@ -408,6 +594,11 @@ export default function ShipmentsPage() {
     fetchCommercials();
   }, [fetchShipments, fetchVessels, fetchClients, fetchCommercials]);
 
+  // Auto-generate shipping alerts on mount
+  useEffect(() => {
+    fetch("/api/shipping-alerts").catch(() => {});
+  }, []);
+
   // =====================================================
   // Contracts by Vessel
   // =====================================================
@@ -415,7 +606,16 @@ export default function ShipmentsPage() {
   const fetchVesselContracts = useCallback(async () => {
     try {
       setVesselContractsLoading(true);
-      const res = await fetch("/api/contracts?pageSize=500");
+      const params = new URLSearchParams({ pageSize: "500" });
+      if (selectedYears.length === 1) {
+        params.set("date_from", `${selectedYears[0]}-01-01`);
+        params.set("date_to", `${selectedYears[0]}-12-31`);
+      } else if (selectedYears.length > 1) {
+        const sorted = [...selectedYears].sort();
+        params.set("date_from", `${sorted[0]}-01-01`);
+        params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+      }
+      const res = await fetch(`/api/contracts?${params.toString()}`);
       const json = await res.json();
       if (res.ok) {
         // Only keep contracts that have a vessel_name and are not ANULADO
@@ -429,13 +629,52 @@ export default function ShipmentsPage() {
     } finally {
       setVesselContractsLoading(false);
     }
-  }, []);
+  }, [selectedYears]);
 
   useEffect(() => {
-    if (vesselContracts.length === 0) {
-      fetchVesselContracts();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchVesselContracts();
+  }, [fetchVesselContracts]);
+
+  // ── Split view: motonave a la izquierda + contrato a la derecha ──
+  // splitRatio = % del ancho que ocupa el panel de la motonave (25–75).
+  const [splitContract, setSplitContract] = useState<Contract | null>(null);
+  const [splitRatio, setSplitRatio] = useState(50);
+  const splitRowRef = useRef<HTMLDivElement>(null);
+  const splitDragging = useRef(false);
+
+  // Al cerrar el detalle de motonave, cerrar también el contrato acoplado
+  useEffect(() => {
+    if (!vesselDetailOpen) setSplitContract(null);
+  }, [vesselDetailOpen]);
+
+
+  // Close year dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleYear = (year: string) => {
+    setSelectedYears((prev) => {
+      let next: string[];
+      if (year === "all") {
+        next = [];
+      } else if (prev.includes(year)) {
+        next = prev.filter((y) => y !== year);
+      } else {
+        next = [...prev, year];
+      }
+      setVesselContractsLoading(true);
+      return next;
+    });
+  };
+
+  const yearLabel = selectedYears.length === 0 ? "Todos" : [...selectedYears].sort().join(", ");
 
   const contractsByVessel = useMemo(() => {
     const groups: Record<string, Contract[]> = {};
@@ -485,6 +724,14 @@ export default function ShipmentsPage() {
     const contratosSaldoPendiente = vesselContracts.filter(
       (c) => (c.pending_client_amount ?? 0) > 0
     ).length;
+    // Motonaves EN TRÁNSITO sin actualización reciente
+    const groupsForStale: Record<string, Contract[]> = {};
+    vesselContracts.forEach((c) => {
+      const vessel = c.vessel_name?.trim().toUpperCase() || "SIN MOTONAVE";
+      if (!groupsForStale[vessel]) groupsForStale[vessel] = [];
+      groupsForStale[vessel].push(c);
+    });
+    const porActualizar = Object.values(groupsForStale).filter((group) => getVesselUpdateSignal(group) !== null).length;
     return {
       blPendientes,
       enTransito: vesselEnTransito.size,
@@ -492,6 +739,7 @@ export default function ShipmentsPage() {
       toneladasEnTransito,
       saldoPendiente,
       contratosSaldoPendiente,
+      porActualizar,
     };
   }, [vesselContracts]);
 
@@ -543,7 +791,25 @@ export default function ShipmentsPage() {
       if (!groups[vessel]) groups[vessel] = [];
       groups[vessel].push(c);
     });
-    let result = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+    const statusPriority: Record<string, number> = {
+      "EN TRÁNSITO": 0,
+      "EN PRODUCCIÓN": 1,
+      "PENDIENTE ANTICIPO": 2,
+      "ENTREGADO AL CLIENTE": 3,
+    };
+    let result = Object.entries(groups).sort(([, contractsA], [, contractsB]) => {
+      const statusA = getVesselPrimaryStatus(contractsA);
+      const statusB = getVesselPrimaryStatus(contractsB);
+      const priorityA = statusPriority[statusA] ?? 9;
+      const priorityB = statusPriority[statusB] ?? 9;
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      const etaA = getEarliestEta(contractsA);
+      const etaB = getEarliestEta(contractsB);
+      if (!etaA && !etaB) return 0;
+      if (!etaA) return 1;
+      if (!etaB) return -1;
+      return etaA.localeCompare(etaB);
+    });
 
     // Apply KPI filter on vessel level
     if (vesselFilter !== "all") {
@@ -559,6 +825,8 @@ export default function ShipmentsPage() {
             return contracts.some((c) => (c.pending_client_amount ?? 0) > 0);
           case "bl_pendientes":
             return contracts.some((c) => c.bl_released !== "SI" && c.status !== "ENTREGADO AL CLIENTE");
+          case "por_actualizar":
+            return getVesselUpdateSignal(contracts) !== null;
           default:
             return true;
         }
@@ -877,6 +1145,121 @@ export default function ShipmentsPage() {
     setVesselDetailOpen(true);
   };
 
+  // =====================================================
+  // Inline ETD/ETA Quick Edit
+  // =====================================================
+
+  const startDateEdit = (contractId: string, field: "etd" | "eta_final", currentValue: string | null) => {
+    setEditingDateContractId(contractId);
+    setEditingDateField(field);
+    setEditingDateValue(currentValue || "");
+  };
+
+  const cancelDateEdit = () => {
+    setEditingDateContractId(null);
+    setEditingDateField(null);
+    setEditingDateValue("");
+  };
+
+  const saveDateEdit = async () => {
+    if (!editingDateContractId || !editingDateField) return;
+    setSavingDate(true);
+    try {
+      const payload: Record<string, unknown> = {
+        id: editingDateContractId,
+      };
+      if (editingDateField === "etd") {
+        payload.etd = editingDateValue || null;
+      } else {
+        payload.eta_final = editingDateValue || null;
+      }
+
+      const res = await fetch("/api/contracts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "Error al actualizar fecha");
+        return;
+      }
+      toast.success(`${editingDateField === "etd" ? "ETD" : "ETA"} actualizada`);
+      cancelDateEdit();
+      fetchVesselContracts();
+    } catch {
+      toast.error("Error de conexion");
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  // ── Vessel-level date editing ──────────────────────────
+  const startVesselDateEdit = (contracts: Contract[]) => {
+    // Pre-fill from the first contract that has dates
+    const ref = contracts.find((c) => c.etd || c.eta_initial || c.eta_final) || contracts[0];
+    setVesselDateEtd(ref?.etd || "");
+    setVesselDateEtaInitial(ref?.eta_initial || "");
+    setVesselDateEtaFinal(ref?.eta_final || "");
+    // Pre-fill status from most common status
+    const statusRef = contracts.find((c) => c.status) || contracts[0];
+    setVesselDateStatus(statusRef?.status || "");
+    setVesselDateEditing(true);
+  };
+
+  const cancelVesselDateEdit = () => {
+    setVesselDateEditing(false);
+    setVesselDateEtd("");
+    setVesselDateEtaInitial("");
+    setVesselDateEtaFinal("");
+    setVesselDateStatus("");
+  };
+
+  const saveVesselDates = async (vesselName: string) => {
+    setVesselDateSaving(true);
+    try {
+      const payload: Record<string, unknown> = { vessel_name: vesselName };
+      payload.etd = vesselDateEtd || null;
+      payload.eta_initial = vesselDateEtaInitial || null;
+      payload.eta_final = vesselDateEtaFinal || null;
+      if (vesselDateStatus) {
+        payload.status = vesselDateStatus;
+      }
+
+      const res = await fetch("/api/contracts/vessel-dates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error || "Error al actualizar");
+        return;
+      }
+      toast.success(`${json.updatedCount} contrato${json.updatedCount !== 1 ? "s" : ""} actualizado${json.updatedCount !== 1 ? "s" : ""}`);
+      cancelVesselDateEdit();
+
+      // Update dialog data immediately so user sees changes without closing
+      if (vesselDetailData && vesselDetailData.name === vesselName) {
+        const updatedContracts = vesselDetailData.contracts.map((c) => ({
+          ...c,
+          etd: vesselDateEtd || null,
+          eta_initial: vesselDateEtaInitial || null,
+          eta_final: vesselDateEtaFinal || null,
+          ...(vesselDateStatus ? { status: vesselDateStatus as Contract["status"] } : {}),
+        }));
+        setVesselDetailData({ name: vesselName, contracts: updatedContracts });
+      }
+
+      // Also refresh the background data
+      fetchVesselContracts();
+    } catch {
+      toast.error("Error de conexión");
+    } finally {
+      setVesselDateSaving(false);
+    }
+  };
+
   // Vessel Tab Helpers
   // =====================================================
 
@@ -894,6 +1277,64 @@ export default function ShipmentsPage() {
       .filter((d): d is string => !!d)
       .sort();
     return etas[0] || null;
+  }
+
+  // Señal "por actualizar" derivada de las fechas de los contratos.
+  // Prioridad: ETA vencida > ETD vencido > fechas incompletas > llegada inminente.
+  function getVesselUpdateSignal(contracts: Contract[]): VesselUpdateSignal {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysUntil = (iso: string) => {
+      const d = new Date(iso.split("T")[0] + "T00:00:00");
+      if (isNaN(d.getTime())) return null;
+      return Math.floor((d.getTime() - today.getTime()) / 86400000);
+    };
+
+    const transit = contracts.filter((c) => c.status === "EN TRÁNSITO");
+    const production = contracts.filter((c) => c.status === "EN PRODUCCIÓN");
+
+    // 1. ETA vencida y sigue EN TRÁNSITO → ¿ya llegó? actualizar fecha o status
+    let etaOverdue: number | null = null;
+    for (const c of transit) {
+      if (!c.eta_final) continue;
+      const d = daysUntil(c.eta_final);
+      if (d !== null && d < 0) etaOverdue = Math.max(etaOverdue ?? 0, -d);
+    }
+    if (etaOverdue !== null) {
+      return { reason: `ETA venció hace ${etaOverdue}d — ¿llegó?`, severity: "danger" };
+    }
+
+    // 2. ETD vencido y sigue EN PRODUCCIÓN → ¿ya zarpó? actualizar status
+    let etdOverdue: number | null = null;
+    for (const c of production) {
+      if (!c.etd) continue;
+      const d = daysUntil(c.etd);
+      if (d !== null && d < 0) etdOverdue = Math.max(etdOverdue ?? 0, -d);
+    }
+    if (etdOverdue !== null) {
+      return { reason: `ETD venció hace ${etdOverdue}d — ¿zarpó?`, severity: "danger" };
+    }
+
+    // 3. Fechas incompletas
+    if (transit.some((c) => !c.eta_final)) {
+      return { reason: "En tránsito sin ETA", severity: "warning" };
+    }
+    if (production.some((c) => !c.etd)) {
+      return { reason: "Motonave asignada sin ETD", severity: "warning" };
+    }
+
+    // 4. Llegada inminente → confirmar en el tracking
+    let soonest: number | null = null;
+    for (const c of transit) {
+      if (!c.eta_final) continue;
+      const d = daysUntil(c.eta_final);
+      if (d !== null && d >= 0 && d <= ETA_SOON_DAYS) soonest = Math.min(soonest ?? d, d);
+    }
+    if (soonest !== null) {
+      return { reason: soonest === 0 ? "Llega hoy — confirmar" : `Llega en ${soonest}d — confirmar`, severity: "warning" };
+    }
+
+    return null;
   }
 
   // =====================================================
@@ -984,6 +1425,11 @@ export default function ShipmentsPage() {
   // =====================================================
 
   return (
+    <div style={{
+      background: T.glassBg, backdropFilter: T.glassBlur,
+      border: `1px solid ${T.glassBorder}`, borderRadius: T.radius,
+      boxShadow: T.shadowGlass, padding: "24px 28px",
+    }}>
     <div style={{ minHeight: "100vh", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif", color: T.ink, fontSize: 14 }}>
       <style>{`
         @keyframes sFadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -1002,16 +1448,19 @@ export default function ShipmentsPage() {
 
       {/* Header Banner */}
       <div style={{
-        position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        position: "relative", overflow: "visible", borderRadius: 14,
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: T.shadowMd,
         animation: "sFadeIn 0.4s ease both",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1023,15 +1472,78 @@ export default function ShipmentsPage() {
             <div>
               <h1 style={{
                 fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
-                fontSize: 18, fontWeight: 800, color: "#fff",
-                letterSpacing: "-0.02em", lineHeight: 1.2,
+                fontSize: 22, fontWeight: 700, color: "#fff",
+                letterSpacing: "-0.3px", lineHeight: 1.2,
               }}>Seguimiento de Embarques</h1>
-              <p style={{ fontSize: 12, color: "rgba(191,219,254,0.7)", fontWeight: 500 }}>
+              <p style={{ fontSize: 13, color: T.inkMuted, fontWeight: 500, opacity: 0.85 }}>
                 Contratos agrupados por motonave — seguimiento logístico y de cobros
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div ref={yearDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setYearDropdownOpen(!yearDropdownOpen)}
+                style={{
+                  padding: "6px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)",
+                  color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", outline: "none", display: "flex", alignItems: "center", gap: 6,
+                  minWidth: 80,
+                }}
+              >
+                {yearLabel}
+                <ChevronDown size={14} style={{ opacity: 0.7 }} />
+              </button>
+              {yearDropdownOpen && typeof document !== "undefined" && createPortal(
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 99998 }} onMouseDown={() => setYearDropdownOpen(false)} />
+                  <div onMouseDown={(e) => e.stopPropagation()} style={{
+                    position: "fixed",
+                    top: (yearDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                    left: (yearDropdownRef.current?.getBoundingClientRect().left ?? 0),
+                    zIndex: 99999,
+                    background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
+                  }}>
+                    {[
+                      { value: "all", label: "Todos" },
+                      { value: "2026", label: "2026" },
+                      { value: "2025", label: "2025" },
+                      { value: "2024", label: "2024" },
+                    ].map((opt) => {
+                      const isAll = opt.value === "all";
+                      const isChecked = isAll ? selectedYears.length === 0 : selectedYears.includes(opt.value);
+                      return (
+                        <div
+                          key={opt.value}
+                          onClick={(e) => { e.stopPropagation(); toggleYear(opt.value); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                            borderRadius: 6, cursor: "pointer",
+                            background: isChecked ? T.accentLight : "transparent",
+                            transition: "background 0.15s",
+                          }}
+                          onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = T.surfaceHover; }}
+                          onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isChecked ? T.accent : T.surface,
+                            border: `1.5px solid ${isChecked ? T.accent : T.border}`,
+                          }}>
+                            {isChecked && <Check size={12} style={{ color: "#fff" }} />}
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: isChecked ? 600 : 400, color: isChecked ? T.accent : T.ink }}>{opt.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
+            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.2)" }} />
             <button
               onClick={fetchVesselContracts}
               style={{
@@ -1063,18 +1575,18 @@ export default function ShipmentsPage() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} style={{ borderRadius: T.radius, border: `1px solid ${T.borderLight}`, background: T.surface, padding: 24, animation: `sFadeUp 0.5s ease ${300 + i * 80}ms both` }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                      <div style={{ width: 44, height: 44, borderRadius: 14, background: T.borderLight }} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} style={{ borderRadius: T.radius, border: `1px solid ${T.borderLight}`, background: T.surface, padding: "13px 14px", animation: `sFadeUp 0.5s ease ${300 + i * 60}ms both` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 9, background: T.borderLight }} />
                       <div style={{ flex: 1 }}>
-                        <div style={{ height: 14, width: 140, background: T.borderLight, borderRadius: 4, marginBottom: 6 }} />
-                        <div style={{ height: 10, width: 90, background: T.border, borderRadius: 4 }} />
+                        <div style={{ height: 12, width: 110, background: T.borderLight, borderRadius: 4, marginBottom: 5 }} />
+                        <div style={{ height: 9, width: 70, background: T.border, borderRadius: 4 }} />
                       </div>
                     </div>
-                    <div style={{ height: 48, background: T.surfaceAlt, borderRadius: 12, marginBottom: 8 }} />
-                    <div style={{ height: 48, background: T.surfaceAlt, borderRadius: 12 }} />
+                    <div style={{ height: 22, width: 90, background: T.surfaceAlt, borderRadius: 8, marginBottom: 10 }} />
+                    <div style={{ height: 30, background: T.surfaceAlt, borderRadius: 8 }} />
                   </div>
                 ))}
               </div>
@@ -1088,8 +1600,9 @@ export default function ShipmentsPage() {
           ) : (
             <>
               {/* ===== KPI Summary Cards ===== */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10 }}>
                 {([
+                  { label: "Por Actualizar", value: vesselKpis.porActualizar, filterKey: "por_actualizar" as VesselFilterType, color: T.orange, bg: T.orangeBg, icon: RefreshCw, subtitle: "fechas vencidas o por confirmar" },
                   { label: "BL Pendientes", value: vesselKpis.blPendientes, filterKey: "bl_pendientes" as VesselFilterType, color: T.accent, bg: T.accentLight, icon: ClipboardCheck },
                   { label: "En Tránsito", value: vesselKpis.enTransito, filterKey: "en_transito" as VesselFilterType, color: T.teal, bg: T.tealBg, icon: Globe },
                   { label: "Pdte. Embarque", value: vesselKpis.pendienteEmbarque, filterKey: "pendiente_embarque" as VesselFilterType, color: T.warning, bg: T.warningBg, icon: Package },
@@ -1408,20 +1921,14 @@ export default function ShipmentsPage() {
                 </p>
               </div>
 
-              {/* ===== Vessel Cards Grid ===== */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+              {/* ===== Vessel Cards Grid (compact) ===== */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {filteredContractsByVessel.map(([vesselName, contracts], vIdx) => {
                   const primaryStatus = getVesselPrimaryStatus(contracts);
                   const earliestEta = getEarliestEta(contracts);
                   const shippingCompany = contracts.find((c) => c.shipping_company)?.shipping_company;
                   const totalTons = contracts.reduce((s, c) => s + (c.tons_shipped ?? c.tons_agreed ?? 0), 0);
                   const totalPending = contracts.reduce((s, c) => s + (c.pending_client_amount ?? 0), 0);
-                  const statusColor = primaryStatus === "EN TRÁNSITO" ? T.blue
-                    : primaryStatus === "EN PRODUCCIÓN" ? T.warning
-                    : primaryStatus === "PENDIENTE ANTICIPO" ? T.inkLight
-                    : primaryStatus === "ENTREGADO AL CLIENTE" ? T.success
-                    : T.inkLight;
-
                   return (
                     <PCard
                       key={vesselName}
@@ -1430,150 +1937,151 @@ export default function ShipmentsPage() {
                       onClick={() => openVesselDetail(vesselName, contracts)}
                       style={{ position: "relative", overflow: "hidden" }}
                     >
-                      {/* Top accent line */}
-                      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: statusColor }} />
-
-                      {/* Vessel Header */}
-                      <div style={{ padding: "18px 20px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                      {/* Compact Vessel Body */}
+                      <div style={{ padding: "13px 14px 12px" }}>
+                        {/* Header: vessel name + tracking */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                             <div style={{
-                              width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-                              background: T.accentLight, display: "flex", alignItems: "center", justifyContent: "center",
-                              color: T.accent,
+                              width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+                              background: T.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "center",
+                              color: T.inkLight,
                             }}>
-                              <Ship style={{ width: 20, height: 20 }} />
+                              <Ship style={{ width: 16, height: 16 }} />
                             </div>
                             <div style={{ minWidth: 0 }}>
-                              <h3 style={{ fontSize: 14, fontWeight: 800, color: T.accent, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <h3 style={{ fontSize: 13, fontWeight: 800, color: T.ink, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}>
                                 {vesselName}
                               </h3>
                               {shippingCompany && (
-                                <p style={{ fontSize: 11, color: T.inkLight, marginTop: 1 }}>{shippingCompany}</p>
+                                <p style={{ fontSize: 10, color: T.inkLight, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shippingCompany}</p>
                               )}
                             </div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            {earliestEta && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: T.blue, background: T.blueBg, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center", gap: 4 }}>
-                                <CalendarIcon style={{ width: 12, height: 12 }} />
-                                ETA {formatDate(earliestEta)}
-                              </span>
-                            )}
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] font-semibold gap-1.5 rounded-lg px-2.5 py-1",
-                                CONTRACT_STATUS_COLORS[primaryStatus] || "bg-gray-100 text-gray-800 border-gray-200"
-                              )}
-                            >
-                              <span className={cn("h-1.5 w-1.5 rounded-full inline-block", CONTRACT_STATUS_DOT_COLORS[primaryStatus] || "bg-slate-400")} />
-                              {CONTRACT_STATUS_LABELS[primaryStatus] || primaryStatus}
-                            </Badge>
-                          </div>
+                          {/* Tracking button (compact, icon-only) */}
+                          {(() => {
+                            const sampleContract = contracts.find((c) => c.shipping_company || c.bl_number || c.vessel_name);
+                            if (!sampleContract) return null;
+                            const directUrl = getDirectContainerTrackingUrl({
+                              shipping_company: sampleContract.shipping_company,
+                              bl_number: sampleContract.bl_number,
+                              shipment_type: sampleContract.shipment_type,
+                            });
+                            const vesselUrl = directUrl ? null : getDirectVesselTrackingUrl(sampleContract.vessel_name ?? vesselName);
+                            const url = directUrl || vesselUrl;
+                            if (!url) return null;
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const textToCopy = directUrl ? (sampleContract.bl_number ?? "") : (sampleContract.vessel_name ?? vesselName);
+                                  if (textToCopy) {
+                                    navigator.clipboard.writeText(textToCopy).then(() => {
+                                      toast.success(directUrl ? `BL copiado: ${textToCopy}` : `Motonave copiada: ${textToCopy}`);
+                                    });
+                                  }
+                                  window.open(url, "_blank", "noopener,noreferrer");
+                                }}
+                                title="Rastrear embarque"
+                                style={{
+                                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                  color: T.inkLight, background: T.surfaceAlt, padding: "6px", borderRadius: 8,
+                                  border: `1px solid ${T.borderLight}`, cursor: "pointer", transition: "all 0.2s ease",
+                                }}
+                              >
+                                <Globe style={{ width: 14, height: 14 }} />
+                              </button>
+                            );
+                          })()}
                         </div>
 
-                        {/* Vessel summary stats */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10, fontSize: 11, color: T.inkMuted }}>
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        {/* Status badge + freshness */}
+                        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-semibold gap-1.5 rounded-lg px-2.5 py-1",
+                              CONTRACT_STATUS_COLORS[primaryStatus] || "bg-gray-100 text-gray-800 border-gray-200"
+                            )}
+                          >
+                            <span className={cn("h-1.5 w-1.5 rounded-full inline-block", CONTRACT_STATUS_DOT_COLORS[primaryStatus] || "bg-slate-400")} />
+                            {CONTRACT_STATUS_LABELS[primaryStatus] || primaryStatus}
+                          </Badge>
+                          {(() => {
+                            const signal = getVesselUpdateSignal(contracts);
+                            if (!signal) return null;
+                            const color = signal.severity === "danger" ? T.danger : T.orange;
+                            return (
+                              <span
+                                style={{
+                                  display: "inline-flex", alignItems: "center", gap: 5,
+                                  padding: "2.5px 8px", borderRadius: 8,
+                                  background: color + "14", color,
+                                  fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+                                  border: `1px solid ${color}30`,
+                                }}
+                                title="Detectado a partir de las fechas del contrato — actualiza tu Excel y vuelve a importar para limpiar la alerta"
+                              >
+                                <RefreshCw style={{ width: 10, height: 10 }} />
+                                {signal.reason}
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        {/* ETA compact line (key info) */}
+                        {earliestEta && primaryStatus !== "ENTREGADO AL CLIENTE" ? (() => {
+                          const daysLeft = differenceInCalendarDays(parseISO(earliestEta), new Date());
+                          const isOverdue = daysLeft < 0;
+                          const isImminent = daysLeft >= 0 && daysLeft <= 3;
+                          // Color reservado solo para alertas (atrasada / inminente); el resto neutro
+                          const alert = isOverdue ? T.danger : isImminent ? T.warning : null;
+                          const daysLabel = isOverdue
+                            ? `${Math.abs(daysLeft)}d retraso`
+                            : daysLeft === 0 ? "Hoy"
+                            : daysLeft === 1 ? "Mañana"
+                            : `${daysLeft} días`;
+                          return (
+                            <div style={{
+                              marginTop: 10, padding: "7px 10px", borderRadius: T.radiusSm,
+                              background: T.surfaceAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+                            }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 6, color: T.inkSoft, fontWeight: 700, fontSize: 12.5, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+                                <Anchor style={{ width: 13, height: 13, color: T.inkLight }} />
+                                {formatDate(earliestEta)}
+                              </span>
+                              <span style={{ fontSize: 10.5, fontWeight: 700, color: alert ?? T.inkLight, padding: "2px 8px", borderRadius: 20, background: alert ? `${alert}1A` : "transparent" }}>
+                                {daysLabel}
+                              </span>
+                            </div>
+                          );
+                        })() : (
+                          <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: T.radiusSm, background: T.surfaceAlt, display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: T.inkLight, fontWeight: 600 }}>
+                            <Anchor style={{ width: 13, height: 13 }} />
+                            {primaryStatus === "ENTREGADO AL CLIENTE" ? "Entregado al cliente" : "Sin ETA"}
+                          </div>
+                        )}
+
+                        {/* Footer: contracts·tons + saldo pendiente (key info) */}
+                        <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.inkMuted }}>
                             <FileText style={{ width: 12, height: 12, color: T.inkLight }} />
-                            <span style={{ fontWeight: 600, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{contracts.length}</span> contrato{contracts.length !== 1 ? "s" : ""}
+                            <span style={{ fontWeight: 700, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{contracts.length}</span>
+                            <span style={{ color: T.inkGhost }}>·</span>
+                            <span style={{ fontWeight: 700, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{formatNumber(totalTons)}</span> t
                           </span>
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <Weight style={{ width: 12, height: 12, color: T.inkLight }} />
-                            <span style={{ fontWeight: 600, color: T.ink, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{formatNumber(totalTons)}</span> t
-                          </span>
-                          {totalPending > 0 && (
-                            <span style={{ display: "flex", alignItems: "center", gap: 4, color: T.danger, fontWeight: 600 }}>
-                              <DollarSign style={{ width: 12, height: 12 }} />
+                          {totalPending > 0 ? (
+                            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 800, color: T.danger, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+                              <span style={{ width: 6, height: 6, borderRadius: 99, background: T.danger, display: "inline-block" }} />
                               {formatCurrency(totalPending)}
+                            </span>
+                          ) : (
+                            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: T.inkLight }}>
+                              <CheckCircle2 style={{ width: 13, height: 13 }} />
+                              Pagado
                             </span>
                           )}
                         </div>
-                      </div>
-
-                      {/* Divider */}
-                      <div style={{ margin: "0 20px", height: 1, background: T.borderLight }} />
-
-                      {/* Contract Mini-Cards */}
-                      <div style={{ padding: "10px 20px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-                        {contracts.map((contract) => (
-                          <div key={contract.id} style={{
-                            borderRadius: T.radiusSm, border: `1px solid ${T.borderLight}`,
-                            background: T.surfaceAlt, padding: "10px 12px",
-                            transition: "background 0.2s ease",
-                          }}>
-                            {/* Row 1: Client + Contract + Country + Status */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-                                <span style={{ fontSize: 12, fontWeight: 800, color: T.accent, whiteSpace: "nowrap", fontFamily: "var(--font-jetbrains-mono), monospace" }}>
-                                  {contract.client_contract || "S/C"}
-                                </span>
-                                <span style={{ color: T.inkGhost }}>|</span>
-                                <span style={{ fontSize: 12, color: T.inkMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contract.client_name}</span>
-                                {contract.country && COUNTRY_FLAGS[contract.country.toUpperCase()] && (
-                                  <span style={{ fontSize: 12, flexShrink: 0 }}>{COUNTRY_FLAGS[contract.country.toUpperCase()]}</span>
-                                )}
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-[9px] font-semibold gap-1 rounded-md px-2 py-0.5 shrink-0 ml-2",
-                                  CONTRACT_STATUS_COLORS[contract.status || ""] || "bg-gray-100 text-gray-800 border-gray-200"
-                                )}
-                              >
-                                <span className={cn("h-1 w-1 rounded-full inline-block", CONTRACT_STATUS_DOT_COLORS[contract.status || ""] || "bg-gray-400")} />
-                                {contract.status || "—"}
-                              </Badge>
-                            </div>
-
-                            {/* Row 2: Key metrics */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: T.inkMuted, flexWrap: "wrap" }}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                <Weight style={{ width: 12, height: 12, color: T.inkLight }} />
-                                <span style={{ fontWeight: 600, color: T.inkSoft }}>{formatNumber(contract.tons_shipped ?? contract.tons_agreed ?? 0)} t</span>
-                              </span>
-
-                              {(contract.pending_client_amount ?? 0) > 0 ? (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3, color: T.danger }}>
-                                  <DollarSign style={{ width: 12, height: 12 }} />
-                                  <span style={{ fontWeight: 600 }}>{formatCurrency(contract.pending_client_amount)}</span>
-                                </span>
-                              ) : (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3, color: T.success }}>
-                                  <DollarSign style={{ width: 12, height: 12 }} />
-                                  <span style={{ fontWeight: 600 }}>Pagado</span>
-                                </span>
-                              )}
-
-                              {contract.bl_released === "SI" ? (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3, color: T.success }}>
-                                  <CheckCircle2 style={{ width: 12, height: 12 }} />
-                                  <span style={{ fontWeight: 600 }}>BL Liberado</span>
-                                </span>
-                              ) : (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3, color: T.danger }}>
-                                  <XCircle style={{ width: 12, height: 12 }} />
-                                  <span style={{ fontWeight: 600 }}>BL Pendiente</span>
-                                </span>
-                              )}
-
-                              {contract.balance_paid === "SI" && (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3, color: T.success }}>
-                                  <CheckCircle2 style={{ width: 12, height: 12 }} />
-                                  <span style={{ fontWeight: 600 }}>Saldo OK</span>
-                                </span>
-                              )}
-
-                              {contract.arrival_port && (
-                                <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                  <MapPin style={{ width: 12, height: 12, color: T.inkLight }} />
-                                  <span>{contract.arrival_port}</span>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
                       </div>
                     </PCard>
                   );
@@ -2594,6 +3102,7 @@ export default function ShipmentsPage() {
                     type="submit"
                     disabled={submitting}
                     className="bg-[#1E3A5F] hover:bg-[#152d4a]"
+                    style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                   >
                     {submitting
                       ? "Guardando..."
@@ -2639,6 +3148,7 @@ export default function ShipmentsPage() {
                 onClick={handleCreateVessel}
                 disabled={creatingVessel || !newVesselName.trim()}
                 className="bg-[#1E3A5F] hover:bg-[#152d4a]"
+                style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
               >
                 {creatingVessel ? "Creando..." : "Crear Motonave"}
               </Button>
@@ -2662,27 +3172,40 @@ export default function ShipmentsPage() {
           : vdPrimaryStatus === "ENTREGADO AL CLIENTE" ? T.success
           : T.inkLight;
 
-        return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        return createPortal(
+          <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             {/* Overlay */}
             <div
               style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(12px)", transition: "opacity 0.3s" }}
               onClick={() => setVesselDetailOpen(false)}
             />
 
-            {/* Card */}
+            {/* Row: motonave + (divisor + contrato) en split view */}
+            <div
+              ref={splitRowRef}
+              style={{
+                position: "relative", width: "100%",
+                maxWidth: splitContract ? "none" : 1080,
+                height: splitContract ? "90vh" : undefined,
+                display: "flex", alignItems: "stretch", justifyContent: "center",
+              }}
+            >
+
+            {/* Card motonave */}
             <div style={{
-              position: "relative", width: "100%", maxWidth: 1080, maxHeight: "90vh",
+              position: "relative",
+              width: splitContract ? `${splitRatio}%` : "100%",
+              minWidth: 0, maxHeight: "90vh",
               display: "flex", flexDirection: "column", borderRadius: 22,
               border: `1px solid ${T.borderLight}`, background: "rgba(255,255,255,0.92)",
-              backdropFilter: "blur(24px)", boxShadow: "0 32px 64px -12px rgba(0,0,0,0.25)",
+              backdropFilter: "blur(24px)", boxShadow: "0 32px 64px -12px rgba(11,83,148,0.18)",
               animation: "sFadeUp 0.35s ease both", overflow: "hidden",
             }}>
               {/* Accent bar */}
               <div style={{ height: 3, background: vdStatusColor }} />
 
               {/* Header */}
-              <div style={{ padding: "20px 28px 16px", borderBottom: `1px solid ${T.borderLight}` }}>
+              <div style={{ padding: "20px 28px 16px", borderBottom: `1px solid ${T.borderLight}`, flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
                     <div style={{
@@ -2698,12 +3221,27 @@ export default function ShipmentsPage() {
                         {vdShippingCo && (
                           <span style={{ fontSize: 12, color: T.inkLight }}>{vdShippingCo}</span>
                         )}
-                        {vdEta && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: T.blue, background: T.blueBg, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center", gap: 4 }}>
-                            <CalendarIcon style={{ width: 12, height: 12 }} />
-                            ETA {formatDate(vdEta)}
-                          </span>
-                        )}
+                        {vdEta && vdPrimaryStatus !== "ENTREGADO AL CLIENTE" && (() => {
+                          const vdDaysLeft = differenceInCalendarDays(parseISO(vdEta), new Date());
+                          const vdIsOverdue = vdDaysLeft < 0;
+                          const vdIsImminent = vdDaysLeft >= 0 && vdDaysLeft <= 3;
+                          const vdDaysLabel = vdIsOverdue
+                            ? `${Math.abs(vdDaysLeft)}d retraso`
+                            : vdDaysLeft === 0 ? "Hoy" : vdDaysLeft === 1 ? "Mañana" : `${vdDaysLeft}d`;
+                          return (
+                            <span style={{
+                              fontSize: 11, fontWeight: 700,
+                              color: vdIsOverdue ? T.danger : vdIsImminent ? T.warning : T.blue,
+                              background: vdIsOverdue ? T.dangerBg : vdIsImminent ? T.warningBg : T.blueBg,
+                              padding: "3px 10px", borderRadius: 6,
+                              display: "flex", alignItems: "center", gap: 5,
+                            }}>
+                              <Anchor style={{ width: 13, height: 13 }} />
+                              ETA {formatDate(vdEta)}
+                              <span style={{ opacity: 0.7, fontSize: 10 }}>({vdDaysLabel})</span>
+                            </span>
+                          );
+                        })()}
                         <Badge
                           variant="outline"
                           className={cn(
@@ -2714,6 +3252,69 @@ export default function ShipmentsPage() {
                           <span className={cn("h-1.5 w-1.5 rounded-full inline-block", CONTRACT_STATUS_DOT_COLORS[vdPrimaryStatus] || "bg-slate-400")} />
                           {CONTRACT_STATUS_LABELS[vdPrimaryStatus] || vdPrimaryStatus}
                         </Badge>
+                        {/* Tracking links in detail dialog */}
+                        {(() => {
+                          const refContract = vdContracts.find((cc) => cc.shipping_company || cc.bl_number || cc.vessel_name);
+                          if (!refContract) return null;
+
+                          // Container line → direct redirect to carrier tracking page
+                          const directUrl = getDirectContainerTrackingUrl({
+                            shipping_company: refContract.shipping_company,
+                            bl_number: refContract.bl_number,
+                            shipment_type: refContract.shipment_type,
+                          });
+
+                          if (directUrl) {
+                            return (
+                              <button
+                                onClick={() => {
+                                  const blText = refContract.bl_number ?? "";
+                                  if (blText) {
+                                    navigator.clipboard.writeText(blText).then(() => {
+                                      toast.success(`BL copiado: ${blText}`);
+                                    });
+                                  }
+                                  window.open(directUrl, "_blank", "noopener,noreferrer");
+                                }}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 4,
+                                  fontSize: 10, fontWeight: 600, color: T.teal,
+                                  background: T.tealBg, padding: "3px 10px", borderRadius: 6,
+                                  border: "none", cursor: "pointer",
+                                }}
+                              >
+                                <Globe style={{ width: 12, height: 12 }} />
+                                Tracking
+                              </button>
+                            );
+                          }
+
+                          // Motonave habitual → direct redirect to MarineTraffic
+                          const vesselUrl = getDirectVesselTrackingUrl(refContract.vessel_name ?? vd.name);
+                          if (!vesselUrl) return null;
+                          return (
+                            <button
+                              onClick={() => {
+                                const textToCopy = refContract.vessel_name ?? vd.name;
+                                if (textToCopy) {
+                                  navigator.clipboard.writeText(textToCopy).then(() => {
+                                    toast.success(`Motonave copiada: ${textToCopy}`);
+                                  });
+                                }
+                                window.open(vesselUrl, "_blank", "noopener,noreferrer");
+                              }}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 4,
+                                fontSize: 10, fontWeight: 600, color: T.teal,
+                                background: T.tealBg, padding: "3px 10px", borderRadius: 6,
+                                border: "none", cursor: "pointer",
+                              }}
+                            >
+                              <Globe style={{ width: 12, height: 12 }} />
+                              Tracking
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2748,15 +3349,149 @@ export default function ShipmentsPage() {
                 </div>
               </div>
 
+              {/* ── Vessel-level date editor ─────────────────────── */}
+              <div style={{ padding: "0 28px", flexShrink: 0 }}>
+                {!vesselDateEditing ? (
+                  <button
+                    onClick={() => startVesselDateEdit(vdContracts)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, width: "100%",
+                      padding: "10px 14px", marginTop: 12, borderRadius: T.radiusSm,
+                      border: `1px dashed ${T.borderLight}`, background: "transparent",
+                      cursor: "pointer", transition: "all 0.2s ease",
+                      fontSize: 12, fontWeight: 600, color: T.accent,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = T.accentLight; e.currentTarget.style.borderColor = T.accent; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = T.borderLight; }}
+                  >
+                    <Pencil style={{ width: 14, height: 14 }} />
+                    Actualizar embarque ({vdContracts.length} contrato{vdContracts.length !== 1 ? "s" : ""})
+                  </button>
+                ) : (
+                  <div style={{
+                    marginTop: 12, padding: "14px 16px", borderRadius: T.radiusSm,
+                    border: `1px solid ${T.accent}`, background: T.accentLight,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                        Actualizar embarque — {vd.name}
+                      </p>
+                      <span style={{ fontSize: 10, color: T.inkMuted, fontWeight: 500 }}>
+                        Se aplicará a {vdContracts.length} contrato{vdContracts.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: T.inkMuted, display: "block", marginBottom: 4 }}>ETD</label>
+                        <input
+                          type="date"
+                          value={vesselDateEtd}
+                          onChange={(e) => setVesselDateEtd(e.target.value)}
+                          style={{
+                            width: "100%", padding: "6px 8px", fontSize: 12, borderRadius: 6,
+                            border: `1px solid ${T.borderLight}`, background: "white",
+                            color: T.ink, outline: "none",
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: T.inkMuted, display: "block", marginBottom: 4 }}>ETA Inicial</label>
+                        <input
+                          type="date"
+                          value={vesselDateEtaInitial}
+                          onChange={(e) => setVesselDateEtaInitial(e.target.value)}
+                          style={{
+                            width: "100%", padding: "6px 8px", fontSize: 12, borderRadius: 6,
+                            border: `1px solid ${T.borderLight}`, background: "white",
+                            color: T.ink, outline: "none",
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: T.inkMuted, display: "block", marginBottom: 4 }}>ETA Final</label>
+                        <input
+                          type="date"
+                          value={vesselDateEtaFinal}
+                          onChange={(e) => setVesselDateEtaFinal(e.target.value)}
+                          style={{
+                            width: "100%", padding: "6px 8px", fontSize: 12, borderRadius: 6,
+                            border: `1px solid ${T.borderLight}`, background: "white",
+                            color: T.ink, outline: "none",
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: T.inkMuted, display: "block", marginBottom: 4 }}>Estado</label>
+                        <select
+                          value={vesselDateStatus}
+                          onChange={(e) => setVesselDateStatus(e.target.value)}
+                          style={{
+                            width: "100%", padding: "6px 8px", fontSize: 12, borderRadius: 6,
+                            border: `1px solid ${T.borderLight}`, background: "white",
+                            color: T.ink, outline: "none", cursor: "pointer",
+                          }}
+                        >
+                          <option value="">— Sin cambiar —</option>
+                          <option value="EN PRODUCCIÓN">En Producción</option>
+                          <option value="EN TRÁNSITO">En Tránsito</option>
+                          <option value="ENTREGADO AL CLIENTE">Entregado al Cliente</option>
+                          <option value="PENDIENTE ANTICIPO">Pendiente Anticipo</option>
+                          <option value="ANULADO">Anulado</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+                      <button
+                        onClick={cancelVesselDateEdit}
+                        disabled={vesselDateSaving}
+                        style={{
+                          padding: "5px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6,
+                          border: `1px solid ${T.borderLight}`, background: "white",
+                          color: T.inkMuted, cursor: "pointer",
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={() => saveVesselDates(vd.name)}
+                        disabled={vesselDateSaving}
+                        style={{
+                          padding: "5px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6,
+                          border: "none", background: T.accent, color: "white",
+                          cursor: vesselDateSaving ? "wait" : "pointer",
+                          display: "flex", alignItems: "center", gap: 4,
+                          opacity: vesselDateSaving ? 0.7 : 1,
+                        }}
+                      >
+                        <CheckCircle2 style={{ width: 12, height: 12 }} />
+                        {vesselDateSaving ? "Guardando..." : "Guardar cambios"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Contracts scrollable area */}
-              <ScrollArea className="flex-1 overflow-y-auto">
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                 <div style={{ padding: "16px 28px", display: "flex", flexDirection: "column", gap: 12 }}>
                   {vdContracts.map((c) => (
                     <div key={c.id} style={{ borderRadius: T.radiusMd, border: `1px solid ${T.borderLight}`, background: T.surfaceAlt, overflow: "hidden", transition: "background 0.2s ease" }}>
                       {/* Contract header */}
                       <div style={{ padding: "12px 16px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{c.client_contract || "S/C"}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSplitContract(c);
+                            }}
+                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace", background: "none", border: "none", padding: 0, cursor: "pointer", transition: "opacity 0.15s" }}
+                            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.7"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+                            title="Ver contrato al lado (panel dividido)"
+                          >
+                            {c.client_contract || "S/C"}
+                            <ExternalLink style={{ width: 11, height: 11, flexShrink: 0 }} />
+                          </button>
                           {c.china_contract && (
                             <>
                               <span style={{ color: T.inkGhost }}>|</span>
@@ -2781,15 +3516,16 @@ export default function ShipmentsPage() {
                         </Badge>
                       </div>
 
-                      {/* Contract details grid */}
-                      <div style={{ padding: "4px 16px 16px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0 24px" }}>
+                      {/* Contract details grid — auto-fit para que las columnas
+                          se apilen en vez de desbordarse cuando el panel es angosto */}
+                      <div style={{ padding: "4px 16px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "14px 24px" }}>
                         {/* Col 1: General */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                           <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>General</p>
                           <div className="space-y-1.5 text-xs">
                             <div className="flex justify-between">
                               <span className="text-slate-400">Comercial</span>
-                              <span className="font-medium text-slate-700">{c.commercial_name || "—"}</span>
+                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.commercial_name || "—"}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-400">Incoterm</span>
@@ -2797,7 +3533,7 @@ export default function ShipmentsPage() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-400">Producto</span>
-                              <span className="font-medium text-slate-700 text-right max-w-[60%] truncate">{c.detail || "—"}</span>
+                              <span className="font-medium text-slate-700 text-right max-w-[60%] truncate" title={c.detail || ""}>{c.detail || "—"}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-400">Tipo Embarque</span>
@@ -2805,13 +3541,13 @@ export default function ShipmentsPage() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-400">Puerto Arribo</span>
-                              <span className="font-medium text-slate-700">{c.arrival_port || "—"}</span>
+                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.arrival_port || "—"}</span>
                             </div>
                           </div>
                         </div>
 
                         {/* Col 2: Tons & Dates */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                           <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>Toneladas & Fechas</p>
                           <div className="space-y-1.5 text-xs">
                             <div className="flex justify-between">
@@ -2828,17 +3564,91 @@ export default function ShipmentsPage() {
                                 <span className={cn("font-medium tabular-nums", (c.tons_difference ?? 0) < 0 ? "text-rose-600" : "text-emerald-600")}>{formatNumber(c.tons_difference)} t</span>
                               </div>
                             )}
-                            <div className="flex justify-between">
+                            <div className="flex justify-between items-center">
                               <span className="text-slate-400">ETD</span>
-                              <span className="font-medium text-slate-700">{c.etd ? formatDate(c.etd) : "—"}</span>
+                              {editingDateContractId === c.id && editingDateField === "etd" ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                  <input
+                                    type="date"
+                                    value={editingDateValue}
+                                    onChange={(e) => setEditingDateValue(e.target.value)}
+                                    style={{
+                                      fontSize: 11, padding: "2px 6px", borderRadius: T.radiusXs,
+                                      border: `1px solid ${T.accent}`, outline: "none",
+                                      fontFamily: "var(--font-jetbrains-mono), monospace",
+                                      width: 120,
+                                    }}
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={saveDateEdit}
+                                    disabled={savingDate}
+                                    style={{ color: T.success, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
+                                  >
+                                    <CheckCircle2 style={{ width: 14, height: 14 }} />
+                                  </button>
+                                  <button
+                                    onClick={cancelDateEdit}
+                                    style={{ color: T.danger, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
+                                  >
+                                    <X style={{ width: 14, height: 14 }} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span
+                                  className="font-medium text-slate-700 group/etd"
+                                  style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
+                                  onClick={() => startDateEdit(c.id!, "etd", c.etd)}
+                                >
+                                  {c.etd ? formatDate(c.etd) : "\u2014"}
+                                  <Pencil style={{ width: 10, height: 10, color: T.inkGhost, opacity: 0.5 }} />
+                                </span>
+                              )}
                             </div>
                             <div className="flex justify-between">
                               <span className="text-slate-400">ETA Inicial</span>
-                              <span className="font-medium text-slate-700">{c.eta_initial ? formatDate(c.eta_initial) : "—"}</span>
+                              <span className="font-medium text-slate-700">{c.eta_initial ? formatDate(c.eta_initial) : "\u2014"}</span>
                             </div>
-                            <div className="flex justify-between">
+                            <div className="flex justify-between items-center">
                               <span className="text-slate-400">ETA Final</span>
-                              <span className="font-bold text-[#1E3A5F]">{c.eta_final ? formatDate(c.eta_final) : "—"}</span>
+                              {editingDateContractId === c.id && editingDateField === "eta_final" ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                  <input
+                                    type="date"
+                                    value={editingDateValue}
+                                    onChange={(e) => setEditingDateValue(e.target.value)}
+                                    style={{
+                                      fontSize: 11, padding: "2px 6px", borderRadius: T.radiusXs,
+                                      border: `1px solid ${T.accent}`, outline: "none",
+                                      fontFamily: "var(--font-jetbrains-mono), monospace",
+                                      width: 120,
+                                    }}
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={saveDateEdit}
+                                    disabled={savingDate}
+                                    style={{ color: T.success, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
+                                  >
+                                    <CheckCircle2 style={{ width: 14, height: 14 }} />
+                                  </button>
+                                  <button
+                                    onClick={cancelDateEdit}
+                                    style={{ color: T.danger, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
+                                  >
+                                    <X style={{ width: 14, height: 14 }} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span
+                                  className="font-bold text-[#1E3A5F]"
+                                  style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
+                                  onClick={() => startDateEdit(c.id!, "eta_final", c.eta_final)}
+                                >
+                                  {c.eta_final ? formatDate(c.eta_final) : "\u2014"}
+                                  <Pencil style={{ width: 10, height: 10, color: T.inkGhost, opacity: 0.5 }} />
+                                </span>
+                              )}
                             </div>
                             {c.days_difference != null && (
                               <div className="flex justify-between">
@@ -2850,7 +3660,7 @@ export default function ShipmentsPage() {
                         </div>
 
                         {/* Col 3: Payments & Docs */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
                           <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>Pagos & Documentos</p>
                           <div className="space-y-1.5 text-xs">
                             <div className="flex justify-between items-center">
@@ -2889,17 +3699,17 @@ export default function ShipmentsPage() {
                                 <span className="font-medium text-slate-700">{c.bl_number}</span>
                               </div>
                             )}
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Docs. Enviados</span>
-                              <span className="font-medium text-slate-700">{c.documents_sent || "—"}</span>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-400 shrink-0">Docs. Enviados</span>
+                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.documents_sent || "—"}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Docs. Pendientes</span>
-                              <span className="font-medium text-slate-700">{c.documents_pending || "—"}</span>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-400 shrink-0">Docs. Pendientes</span>
+                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.documents_pending || "—"}</span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Docs. Físicos</span>
-                              <span className="font-medium text-slate-700">{c.physical_docs_sent || "—"}</span>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-400 shrink-0">Docs. Físicos</span>
+                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.physical_docs_sent || "—"}</span>
                             </div>
                           </div>
                         </div>
@@ -2907,12 +3717,53 @@ export default function ShipmentsPage() {
                     </div>
                   ))}
                 </div>
-              </ScrollArea>
+              </div>
             </div>
-          </div>
+
+            {/* Divisor arrastrable + panel de contrato (split view) */}
+            {splitContract && (
+              <>
+                <div
+                  onPointerDown={(e) => {
+                    splitDragging.current = true;
+                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  }}
+                  onPointerMove={(e) => {
+                    if (!splitDragging.current || !splitRowRef.current) return;
+                    const rect = splitRowRef.current.getBoundingClientRect();
+                    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+                    setSplitRatio(Math.min(75, Math.max(25, pct)));
+                  }}
+                  onPointerUp={(e) => {
+                    splitDragging.current = false;
+                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  }}
+                  title="Arrastra para ajustar el tamaño de los paneles"
+                  style={{
+                    width: 16, flexShrink: 0, cursor: "col-resize",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    touchAction: "none", position: "relative", zIndex: 2,
+                  }}
+                >
+                  <div style={{
+                    width: 5, height: 64, borderRadius: 99,
+                    background: "rgba(255,255,255,0.85)",
+                    boxShadow: "0 1px 6px rgba(11,83,148,0.35)",
+                  }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
+                  <ContractSplitPanel contract={splitContract} onClose={() => setSplitContract(null)} />
+                </div>
+              </>
+            )}
+
+            </div>
+          </div>,
+          document.body
         );
       })()}
 
+    </div>
     </div>
   );
 }

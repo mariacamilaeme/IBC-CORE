@@ -180,7 +180,8 @@ export type ModuleName =
   | 'reports'
   | 'calendar'
   | 'settings'
-  | 'wiki';
+  | 'wiki'
+  | 'document_generator';
 
 export interface Permission {
   id?: string;
@@ -278,10 +279,18 @@ export interface Client {
   source: string | null;
   is_active: boolean | null;
   notes: string | null;
+  document_info: DocumentInfo | null;
   created_at?: string;
   updated_at?: string;
   created_by: string | null;
   updated_by: string | null;
+}
+
+export interface DocumentInfo {
+  messrs?: string;
+  nit?: string;
+  address?: string;
+  country_city?: string;
 }
 
 // ----- 4. Quotation -----

@@ -38,8 +38,8 @@ function checkRateLimit(ip: string, pathname: string): { blocked: boolean; remai
   return { blocked: false, remaining: limit - entry.count };
 }
 
-// ─── Middleware ───────────────────────────────────────────────────
-export async function middleware(request: NextRequest) {
+// ─── Proxy (Next 16 — runs on Node runtime) ───────────────────────
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow static assets and public files

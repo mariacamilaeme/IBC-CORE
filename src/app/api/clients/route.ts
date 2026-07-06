@@ -197,6 +197,7 @@ export async function POST(request: NextRequest) {
       source: body.source?.trim() || null,
       is_active: true,
       notes: body.notes?.trim() || null,
+      document_info: body.document_info || null,
       created_by: user.id,
       updated_by: user.id,
     };
@@ -290,7 +291,7 @@ export async function PATCH(request: NextRequest) {
       "assigned_commercial_id", "client_type", "industry_sector",
       "payment_terms", "credit_limit", "preferred_currency",
       "shipping_addresses", "additional_contacts", "tags", "source",
-      "is_active", "notes",
+      "is_active", "notes", "document_info",
     ];
 
     const updateData: Record<string, unknown> = { updated_by: user.id };

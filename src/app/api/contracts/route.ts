@@ -42,6 +42,21 @@ export async function GET(request: NextRequest) {
 
     // Parse query params
     const { searchParams } = new URL(request.url);
+
+    // Direct ID lookup — returns a single contract
+    const directId = searchParams.get("id");
+    if (directId) {
+      const { data, error: idError } = await supabase
+        .from("contracts")
+        .select("*")
+        .eq("id", directId)
+        .single();
+      if (idError || !data) {
+        return NextResponse.json({ error: "Contrato no encontrado" }, { status: 404 });
+      }
+      return NextResponse.json(data);
+    }
+
     const search = searchParams.get("search") || "";
     const status = searchParams.get("status") || "";
     const country = searchParams.get("country") || "";
@@ -361,6 +376,39 @@ export async function POST(request: NextRequest) {
       is_active: true,
     };
 
+    // Check for duplicate contracts (china_contract or client_contract)
+    if (contractData.china_contract) {
+      const { data: existingChina } = await supabase
+        .from("contracts")
+        .select("id, china_contract")
+        .eq("china_contract", contractData.china_contract)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (existingChina) {
+        return NextResponse.json(
+          { error: `Ya existe un contrato activo con el número de contrato China "${contractData.china_contract}"` },
+          { status: 409 }
+        );
+      }
+    }
+
+    if (contractData.client_contract) {
+      const { data: existingClient } = await supabase
+        .from("contracts")
+        .select("id, client_contract")
+        .eq("client_contract", contractData.client_contract)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (existingClient) {
+        return NextResponse.json(
+          { error: `Ya existe un contrato activo con el número de contrato cliente "${contractData.client_contract}"` },
+          { status: 409 }
+        );
+      }
+    }
+
     // Insert contract
     const { data: newContract, error: insertError } = await supabase
       .from("contracts")
@@ -636,6 +684,119 @@ export async function PATCH(request: NextRequest) {
     });
   } catch (error) {
     console.error("Unexpected error in PATCH /api/contracts:", error);
+    return NextResponse.json(
+      { error: "Error interno del servidor" },
+      { status: 500 }
+    );
+  }
+}
+
+// =====================================================
+// DELETE /api/contracts
+// Soft-delete a contract (sets is_active = false).
+// Only admin and directora roles are allowed.
+// =====================================================
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createClient();
+
+    // Verify authenticated user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "No autorizado" },
+        { status: 401 }
+      );
+    }
+
+    // Get user profile to check role
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, full_name")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json(
+        { error: "Perfil de usuario no encontrado" },
+        { status: 403 }
+      );
+    }
+
+    // Role check: only admin and directora can delete contracts
+    if (profile.role !== "admin" && profile.role !== "directora") {
+      return NextResponse.json(
+        { error: "No tiene permisos para eliminar contratos" },
+        { status: 403 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "El ID del contrato es obligatorio" },
+        { status: 400 }
+      );
+    }
+
+    // Fetch existing contract for audit log
+    const { data: existingContract, error: fetchError } = await supabase
+      .from("contracts")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !existingContract) {
+      return NextResponse.json(
+        { error: "Contrato no encontrado" },
+        { status: 404 }
+      );
+    }
+
+    // Soft delete: set is_active to false
+    const { error: updateError } = await supabase
+      .from("contracts")
+      .update({ is_active: false, updated_by: user.id })
+      .eq("id", id);
+
+    if (updateError) {
+      console.error("Error deleting contract:", updateError);
+      return NextResponse.json(
+        { error: "Error al eliminar el contrato" },
+        { status: 500 }
+      );
+    }
+
+    // Get IP address for audit log
+    const forwarded = request.headers.get("x-forwarded-for");
+    const ip = forwarded?.split(",")[0]?.trim() || "unknown";
+
+    // Insert audit log
+    const { error: auditError } = await supabase.from("audit_logs").insert({
+      user_id: user.id,
+      user_name: profile.full_name || user.email,
+      user_role: profile.role,
+      action: "delete",
+      table_name: "contracts",
+      record_id: id,
+      old_values: existingContract,
+      new_values: null,
+      ip_address: ip,
+    });
+
+    if (auditError) {
+      console.error("Error inserting audit log:", auditError);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Unexpected error in DELETE /api/contracts:", error);
     return NextResponse.json(
       { error: "Error interno del servidor" },
       { status: 500 }

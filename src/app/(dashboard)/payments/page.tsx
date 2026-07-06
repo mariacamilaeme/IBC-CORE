@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import Link from "next/link";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
@@ -128,8 +129,9 @@ function Card({ children, style = {}, delay = 0, hover = false }: {
 }) {
   return (
     <div className={hover ? "hlift" : ""} style={{
-      background: T.surface, borderRadius: T.radius, border: `1px solid ${T.borderLight}`,
-      boxShadow: T.shadow, animation: `fadeUp .55s cubic-bezier(.4,0,.2,1) ${delay}ms both`,
+      background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur,
+      borderRadius: T.radius, border: `1px solid ${T.glassBorder}`,
+      boxShadow: T.shadowGlass, animation: `fadeUp .55s cubic-bezier(.4,0,.2,1) ${delay}ms both`,
       overflow: "hidden", ...style,
     }}>{children}</div>
   );
@@ -138,11 +140,11 @@ function Card({ children, style = {}, delay = 0, hover = false }: {
 // ─── FORMAT HELPERS ──────────────────────────────────────────
 function fmtUSD(v: number | null | undefined): string {
   if (v == null) return "—";
-  return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return "USD " + v.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtK(v: number): string {
-  return "$" + (v / 1000).toFixed(1) + "K";
+  return "USD " + (v / 1000).toFixed(1) + "K";
 }
 
 // ─── ANALYTICS HELPERS ───────────────────────────────────────
@@ -240,11 +242,51 @@ export default function PaymentsPage() {
   const [newSupplierBank, setNewSupplierBank] = useState("");
   const [newSupplierAccount, setNewSupplierAccount] = useState("");
   const [creatingSup, setCreatingSup] = useState(false);
+  const [selectedYears, setSelectedYears] = useState<string[]>([]);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close year dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleYear = (year: string) => {
+    setSelectedYears((prev) => {
+      let next: string[];
+      if (year === "all") {
+        next = [];
+      } else if (prev.includes(year)) {
+        next = prev.filter((y) => y !== year);
+      } else {
+        next = [...prev, year];
+      }
+      setLoading(true);
+      return next;
+    });
+  };
+
+  const yearLabel = selectedYears.length === 0 ? "Todos" : [...selectedYears].sort().join(", ");
 
   // ── Fetch payments ──
   const fetchPayments = useCallback(async () => {
     try {
-      const res = await fetch(`/api/payments?pageSize=500`);
+      const params = new URLSearchParams({ pageSize: "500" });
+      if (selectedYears.length === 1) {
+        params.set("date_from", `${selectedYears[0]}-01-01`);
+        params.set("date_to", `${selectedYears[0]}-12-31`);
+      } else if (selectedYears.length > 1) {
+        const sorted = [...selectedYears].sort();
+        params.set("date_from", `${sorted[0]}-01-01`);
+        params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+      }
+      const res = await fetch(`/api/payments?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
         setPayments(json.data || []);
@@ -254,7 +296,7 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedYears]);
 
   // ── Fetch suppliers ──
   const fetchSuppliers = useCallback(async () => {
@@ -435,7 +477,6 @@ export default function PaymentsPage() {
       const catIsImpo = cat.key === "impo";
       const ws = wb.addWorksheet(cat.label);
 
-      ws.mergeCells("A1", "K1");
       const c1 = ws.getCell("A1");
       c1.value = {
         richText: [
@@ -477,7 +518,6 @@ export default function PaymentsPage() {
 
       let rowIdx = 4;
       for (const [supplierName, records] of Object.entries(catGrouped)) {
-        ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
         const sCell = ws.getCell(`A${rowIdx}`);
         sCell.value = supplierName;
         sCell.font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } };
@@ -529,7 +569,6 @@ export default function PaymentsPage() {
         rowIdx++;
       }
 
-      ws.mergeCells(`A${rowIdx}`, `K${rowIdx}`);
       const fCell = ws.getCell(`A${rowIdx}`);
       fCell.value = `IBC STEEL GROUP  ·  Generado ${dateStr}`;
       fCell.font = { name: FONT, size: 8, italic: true, color: { argb: "9CA3B4" } };
@@ -586,15 +625,18 @@ export default function PaymentsPage() {
 
       {/* ═══ HEADER BANNER ═══ */}
       <div style={{
-        position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        position: "relative", overflow: "visible", borderRadius: 14,
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: T.shadowMd,
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -616,7 +658,70 @@ export default function PaymentsPage() {
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div ref={yearDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setYearDropdownOpen(!yearDropdownOpen)}
+                style={{
+                  padding: "6px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)",
+                  color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", outline: "none", display: "flex", alignItems: "center", gap: 6,
+                  minWidth: 80,
+                }}
+              >
+                {yearLabel}
+                <ChevronDown size={14} style={{ opacity: 0.7 }} />
+              </button>
+              {yearDropdownOpen && typeof document !== "undefined" && createPortal(
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 99998 }} onMouseDown={() => setYearDropdownOpen(false)} />
+                  <div onMouseDown={(e) => e.stopPropagation()} style={{
+                    position: "fixed",
+                    top: (yearDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                    left: (yearDropdownRef.current?.getBoundingClientRect().left ?? 0),
+                    zIndex: 99999,
+                    background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
+                  }}>
+                    {[
+                      { value: "all", label: "Todos" },
+                      { value: "2026", label: "2026" },
+                      { value: "2025", label: "2025" },
+                      { value: "2024", label: "2024" },
+                    ].map((opt) => {
+                      const isAll = opt.value === "all";
+                      const isChecked = isAll ? selectedYears.length === 0 : selectedYears.includes(opt.value);
+                      return (
+                        <div
+                          key={opt.value}
+                          onClick={(e) => { e.stopPropagation(); toggleYear(opt.value); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                            borderRadius: 6, cursor: "pointer",
+                            background: isChecked ? T.accentLight : "transparent",
+                            transition: "background 0.15s",
+                          }}
+                          onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = T.surfaceHover; }}
+                          onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isChecked ? T.accent : T.surface,
+                            border: `1.5px solid ${isChecked ? T.accent : T.border}`,
+                          }}>
+                            {isChecked && <Check className="h-3 w-3" style={{ color: "#fff" }} />}
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: isChecked ? 600 : 400, color: isChecked ? T.accent : T.ink }}>{opt.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
+            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.2)" }} />
             <button
               onClick={handleExport}
               style={{
@@ -657,10 +762,10 @@ export default function PaymentsPage() {
       {/* ═══ 6 KPI CARDS ═══ */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         {[
-          { label: "Total Facturado", value: totalFacturado, prefix: "$", icon: <DollarSign size={18} />, color: T.accent, bg: T.accentLight },
-          { label: "Pagos Clientes", value: totalRecaudado, prefix: "$", icon: <Wallet size={18} />, color: T.success, bg: T.successBg, sub: `${uniqueClients} clientes activos` },
-          { label: "Total Abonos", value: totalAbonos, prefix: "$", icon: <Layers size={18} />, color: T.blue, bg: T.blueBg, sub: `${countByCategory.abonos} registros` },
-          { label: "Saldo Pendiente", value: totalSaldoPendiente, prefix: "$", icon: <AlertTriangle size={18} />, color: T.danger, bg: T.dangerBg, sub: `${pendingCount} por cobrar` },
+          { label: "Total Facturado", value: totalFacturado, prefix: "USD ", icon: <DollarSign size={18} />, color: T.accent, bg: T.accentLight },
+          { label: "Pagos Clientes", value: totalRecaudado, prefix: "USD ", icon: <Wallet size={18} />, color: T.success, bg: T.successBg, sub: `${uniqueClients} clientes activos` },
+          { label: "Total Abonos", value: totalAbonos, prefix: "USD ", icon: <Layers size={18} />, color: T.blue, bg: T.blueBg, sub: `${countByCategory.abonos} registros` },
+          { label: "Saldo Pendiente", value: totalSaldoPendiente, prefix: "USD ", icon: <AlertTriangle size={18} />, color: T.danger, bg: T.dangerBg, sub: `${pendingCount} por cobrar` },
         ].map((k, i) => (
           <Card key={i} delay={50 * i} hover style={{ padding: "18px 18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -829,8 +934,10 @@ export default function PaymentsPage() {
           return (
             <button key={cat.key} onClick={() => { setActiveCategory(cat.key); setStatusFilter("all"); }} style={{
               padding: "8px 20px", borderRadius: 8, border: "none",
-              background: isActive ? T.surface : "transparent",
-              boxShadow: isActive ? T.shadow : "none",
+              background: isActive ? T.glassBg : "transparent",
+              backdropFilter: isActive ? T.glassBlur : "none",
+              WebkitBackdropFilter: isActive ? T.glassBlur : "none",
+              boxShadow: isActive ? T.shadowGlass : "none",
               color: isActive ? T.ink : T.inkMuted,
               fontWeight: isActive ? 700 : 500,
               fontSize: 12.5, cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
@@ -1168,8 +1275,9 @@ export default function PaymentsPage() {
               onClick={e => e.stopPropagation()}
               style={{
                 width: 520, maxHeight: "85vh", overflowY: "auto",
-                background: T.surface, borderRadius: T.radius,
-                boxShadow: T.shadowLg, border: `1px solid ${T.borderLight}`,
+                background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur,
+                borderRadius: T.radius,
+                boxShadow: T.shadowGlass, border: `1px solid ${T.glassBorder}`,
               }}
             >
               {/* Modal header */}

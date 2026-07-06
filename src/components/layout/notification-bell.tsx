@@ -10,6 +10,8 @@ import {
   CalendarDays,
   Loader2,
   ChevronRight,
+  Eye,
+  BellRing,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import Link from "next/link";
@@ -48,6 +50,18 @@ const PRIORITY_DOT: Record<string, string> = {
   media: "#3B82F6",
   baja: "#22C55E",
 };
+
+const READ_STORAGE_KEY = "ibc_notif_read_ts";
+
+/** Get the timestamp of when "Leer todo" was last clicked */
+function getReadTimestamp(): number {
+  try {
+    const raw = localStorage.getItem(READ_STORAGE_KEY);
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "";
@@ -91,7 +105,13 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [detailLoaded, setDetailLoaded] = useState(false);
+  // "Leer todo" — stores a timestamp; badge hides until new items arrive
+  const [badgeDismissedAt, setBadgeDismissedAt] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    setBadgeDismissedAt(getReadTimestamp());
+  }, []);
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -143,16 +163,34 @@ export function NotificationBell() {
     if (!isOpen) setDetailLoaded(false);
   };
 
+  // "Leer todo" — only clears the badge number, items stay visible in the list
+  const markAllRead = () => {
+    const now = Date.now();
+    setBadgeDismissedAt(now);
+    try {
+      localStorage.setItem(READ_STORAGE_KEY, String(now));
+      localStorage.removeItem("ibc_notif_read");
+    } catch {
+      // silently fail
+    }
+  };
+
+  // "Reactivar" — brings the badge back
+  const reactivateBadge = () => {
+    setBadgeDismissedAt(0);
+    try {
+      localStorage.removeItem(READ_STORAGE_KEY);
+    } catch {
+      // silently fail
+    }
+  };
+
   const navigateToItem = useCallback((type: string, id: string) => {
     setOpen(false);
     router.push(`/calendar?${type}=${id}`);
   }, [router]);
 
-  const totalCount = metrics
-    ? metrics.overdue_count + metrics.tasks_today + metrics.active_reminders
-    : 0;
-  const hasOverdue = (metrics?.overdue_count || 0) > 0;
-
+  // All items are always shown in the popover list
   const overdueTasks = tasks.filter((t) => isOverdue(t.due_date));
   const todayTasks = tasks.filter((t) => isToday(t.due_date));
   const overdueReminders = reminders.filter((r) => isOverdue(r.due_date));
@@ -165,18 +203,24 @@ export function NotificationBell() {
   const todayItems = todayTasks.map((t) => ({ ...t, _type: "task" as const }));
   const reminderItems = activeReminders.map((r) => ({ ...r, _type: "reminder" as const, title: r.title }));
 
+  const totalItems = overdueItems.length + todayItems.length + reminderItems.length;
+
+  // Badge count = 0 if user clicked "Leer todo" (until new data arrives on next fetch cycle)
+  const showBadge = badgeDismissedAt === 0 && totalItems > 0;
+  const hasOverdue = overdueItems.length > 0;
+
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button className="relative p-2.5 rounded-xl hover:bg-slate-100/80 transition-all duration-200 group">
           <Bell
             className={`h-5 w-5 transition-colors ${
-              hasOverdue
+              hasOverdue && showBadge
                 ? "text-red-400 group-hover:text-red-500"
                 : "text-slate-400 group-hover:text-slate-600"
             }`}
           />
-          {totalCount > 0 && (
+          {showBadge && (
             <span
               className="absolute -top-0.5 -right-0.5 flex items-center justify-center border-2 border-white"
               style={{
@@ -186,7 +230,7 @@ export function NotificationBell() {
                 boxShadow: `0 2px 6px ${hasOverdue ? "rgba(239,68,68,0.35)" : "rgba(249,115,22,0.35)"}`,
               }}
             >
-              {totalCount > 99 ? "99+" : totalCount}
+              {totalItems > 99 ? "99+" : totalItems}
             </span>
           )}
         </button>
@@ -211,28 +255,49 @@ export function NotificationBell() {
               Notificaciones
             </span>
           </div>
-          {totalCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              {hasOverdue && (
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
-                  <AlertTriangle className="h-3 w-3" />
-                  {metrics!.overdue_count}
+          <div className="flex items-center gap-2">
+            {totalItems > 0 && (
+              <>
+                {hasOverdue && (
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                    <AlertTriangle className="h-3 w-3" />
+                    {overdueItems.length}
+                  </span>
+                )}
+                <span className="text-[11px] font-medium text-slate-400">
+                  {totalItems} pendiente{totalItems !== 1 ? "s" : ""}
                 </span>
-              )}
-              <span className="text-[11px] font-medium text-slate-400">
-                {totalCount} pendiente{totalCount !== 1 ? "s" : ""}
-              </span>
-            </div>
-          )}
+              </>
+            )}
+            {detailLoaded && totalItems > 0 && (
+              showBadge ? (
+                <button
+                  onClick={markAllRead}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-0.5 rounded-full transition-colors"
+                >
+                  <Eye className="h-3 w-3" />
+                  Leer todo
+                </button>
+              ) : (
+                <button
+                  onClick={reactivateBadge}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-amber-500 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-2.5 py-0.5 rounded-full transition-colors"
+                >
+                  <BellRing className="h-3 w-3" />
+                  Reactivar
+                </button>
+              )
+            )}
+          </div>
         </div>
 
-        {/* ── Body ── */}
+        {/* ── Body — always shows all items ── */}
         <div className="sidebar-scroll bg-white" style={{ overflowY: "auto", maxHeight: "calc(72vh - 108px)" }}>
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
             </div>
-          ) : overdueItems.length === 0 && todayItems.length === 0 && reminderItems.length === 0 ? (
+          ) : totalItems === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-6">
               <CheckCircle2 className="h-8 w-8 text-emerald-400 mb-3" />
               <p className="text-[13px] font-semibold text-slate-600">Todo al dia</p>

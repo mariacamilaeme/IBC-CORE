@@ -351,6 +351,8 @@ export async function PATCH(request: NextRequest) {
 
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
+        // assigned_to is NOT NULL in the DB — never overwrite with null/empty
+        if (field === "assigned_to" && !body[field]) continue;
         updateData[field] = body[field];
       }
     }
@@ -383,7 +385,11 @@ export async function PATCH(request: NextRequest) {
     if (updateError) {
       console.error("Error updating reminder:", updateError);
       return NextResponse.json(
-        { error: "Error al actualizar el recordatorio" },
+        {
+          error: updateError.message
+            ? `Error al actualizar el recordatorio: ${updateError.message}`
+            : "Error al actualizar el recordatorio",
+        },
         { status: 500 }
       );
     }

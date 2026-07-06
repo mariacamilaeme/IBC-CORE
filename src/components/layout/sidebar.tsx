@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useSidebarState } from "@/hooks/useSidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -18,8 +17,6 @@ import {
   Ship,
   Settings,
   LogOut,
-  ChevronLeft,
-  ChevronRight,
   Package,
   ClipboardList,
   BarChart3,
@@ -30,33 +27,43 @@ import {
 
 import type { ModuleName } from "@/types";
 
+// ── Paleta del casco (hull steel) ───────────────────────────
+const BEACON = "#00B8E0";      // cian instrumental — único acento
+const HULL_LINE = "rgba(148,196,235,0.10)";
+
 interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
   module?: ModuleName;
+  group?: "main" | "tools" | "system";
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, module: "dashboard" },
-  { label: "Contratos", href: "/contracts", icon: ClipboardList, module: "contracts" },
-  { label: "Clientes", href: "/clients", icon: Users, module: "clients" },
-  { label: "Cotizaciones", href: "/quotations", icon: FileText, module: "quotations" },
-  { label: "Facturas", href: "/invoices", icon: Receipt, module: "invoices" },
-  { label: "Packing List", href: "/packing-list-converter", icon: Package, module: "packing_list_converter" },
-  { label: "Embarques", href: "/shipments", icon: Ship, module: "shipments" },
-  { label: "Pagos", href: "/payments", icon: CreditCard, module: "payments" },
-  { label: "Reportes", href: "/reports", icon: BarChart3, module: "reports" },
-  { label: "Wiki", href: "/wiki", icon: BookOpen, module: "wiki" },
-  { label: "Calendario", href: "/calendar", icon: Calendar, module: "calendar" },
-  { label: "Configuración", href: "/settings", icon: Settings, module: "settings" },
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, module: "dashboard", group: "main" },
+  { label: "Contratos", href: "/contracts", icon: ClipboardList, module: "contracts", group: "main" },
+  { label: "Clientes", href: "/clients", icon: Users, module: "clients", group: "main" },
+  { label: "Cotizaciones", href: "/quotations", icon: FileText, module: "quotations", group: "main" },
+  { label: "Facturas", href: "/invoices", icon: Receipt, module: "invoices", group: "main" },
+  { label: "Packing List", href: "/packing-list-converter", icon: Package, module: "packing_list_converter", group: "tools" },
+  { label: "Embarques", href: "/shipments", icon: Ship, module: "shipments", group: "tools" },
+  { label: "Pagos", href: "/payments", icon: CreditCard, module: "payments", group: "tools" },
+  { label: "Reportes", href: "/reports", icon: BarChart3, module: "reports", group: "tools" },
+  { label: "Wiki", href: "/wiki", icon: BookOpen, module: "wiki", group: "system" },
+  { label: "Calendario", href: "/calendar", icon: Calendar, module: "calendar", group: "system" },
+  { label: "Configuración", href: "/settings", icon: Settings, module: "settings", group: "system" },
 ];
 
+const GROUP_LABELS: Record<string, string> = {
+  main: "Operación",
+  tools: "Logística",
+  system: "Sistema",
+};
+
 export function Sidebar() {
-  const { collapsed, toggle } = useSidebarState();
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
-  const { canViewModule, loading: permLoading } = usePermissions();
+  const { canViewModule } = usePermissions();
 
   const userRole = profile?.role || "comercial";
   const filteredNav = navItems.filter((item) => {
@@ -76,28 +83,121 @@ export function Sidebar() {
     .toUpperCase()
     .slice(0, 2) || "??";
 
+  const mainItems = filteredNav.filter((i) => i.group === "main");
+  const toolItems = filteredNav.filter((i) => i.group === "tools");
+  const systemItems = filteredNav.filter((i) => i.group === "system");
+
+  const renderNavItem = (item: NavItem) => {
+    const Icon = item.icon;
+    const active = isActive(item.href);
+
+    return (
+      <Tooltip key={item.href} delayDuration={0}>
+        <TooltipTrigger asChild>
+          <Link
+            href={item.href}
+            className={cn(
+              "sb-item group relative flex items-center gap-2.5 rounded-lg text-[13px] transition-all duration-200",
+              active
+                ? "text-white font-semibold"
+                : "text-white/45 font-medium hover:bg-white/[0.05] hover:text-white/85"
+            )}
+            style={active ? { background: "rgba(255,255,255,0.06)" } : undefined}
+          >
+            {/* Barra de rumbo activa — un solo acento cian */}
+            {active && (
+              <div
+                className="absolute left-0 top-1/2 -translate-y-1/2 w-[2.5px] rounded-r-full"
+                style={{
+                  height: "58%",
+                  background: BEACON,
+                  boxShadow: `0 0 10px ${BEACON}66`,
+                }}
+              />
+            )}
+            <div className="sb-icon flex items-center justify-center rounded-md flex-shrink-0">
+              <Icon
+                className="sb-icon-svg transition-colors duration-200"
+                strokeWidth={active ? 2 : 1.5}
+                style={{ color: active ? BEACON : undefined }}
+              />
+            </div>
+            <span className="sidebar-label truncate">{item.label}</span>
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="right" className="font-medium rounded-lg shadow-lg sidebar-tooltip">
+          {item.label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  };
+
+  // Encabezado de grupo: línea + etiqueta mono (visible al expandir)
+  const renderGroupHeader = (group: string) => (
+    <div className="relative flex items-center gap-2 px-2 pt-3 pb-1 select-none">
+      <span
+        className="sidebar-label text-[8.5px] font-semibold uppercase"
+        style={{
+          fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace",
+          letterSpacing: "0.22em",
+          color: "rgba(148,196,235,0.40)",
+        }}
+      >
+        {GROUP_LABELS[group]}
+      </span>
+      <div className="flex-1" style={{ height: 1, background: HULL_LINE }} />
+    </div>
+  );
+
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen flex flex-col sidebar-transition",
-        "bg-gradient-to-b from-[#1a3a6b] via-[#1e3050] to-[#162240] text-white",
-        "shadow-[4px_0_30px_-2px_rgba(10,20,45,0.45)]",
-        "border-r border-white/[0.06]",
-        collapsed ? "w-[72px]" : "w-[260px]"
+        "sticky left-0 top-0 z-40 h-screen flex-shrink-0 flex flex-col sidebar-transition",
+        "text-white"
       )}
+      style={{
+        background: "linear-gradient(180deg, #050F1B 0%, #081C30 55%, #061524 100%)",
+        borderRight: `1px solid ${HULL_LINE}`,
+        boxShadow: "6px 0 28px rgba(3,10,18,0.45)",
+      }}
     >
-      {/* Subtle pattern overlay */}
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMiI+PHBhdGggZD0iTTM2IDE4YzMuMzE0IDAgNi0yLjY4NiA2LTZzLTIuNjg2LTYtNi02LTYgMi42ODYtNiA2IDIuNjg2IDYgNiA2ek0xOCAzNmMzLjMxNCAwIDYtMi42ODYgNi02cy0yLjY4Ni02LTYtNi02IDIuNjg2LTYgNiAyLjY4NiA2IDYgNnoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-50 pointer-events-none" />
+      {/* ═══ Capa decorativa: acero pulido, sin patrones ═══ */}
 
-      {/* Logo */}
-      <div className={cn(
-        "relative flex items-center justify-center px-4 py-5 min-h-[80px]",
-        collapsed ? "px-3" : "px-5"
-      )}>
-        <div className={cn(
-          "relative flex-shrink-0 transition-all duration-300",
-          collapsed ? "w-11 h-11" : "w-[180px] h-[52px]"
-        )}>
+      {/* Brillo diagonal — lámina de acero */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: "linear-gradient(115deg, transparent 0%, rgba(148,196,235,0.05) 32%, rgba(148,196,235,0.02) 46%, transparent 60%)",
+        }}
+      />
+
+      {/* Resplandor de profundidad, arriba y abajo */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          width: "100%", height: "34%", top: 0,
+          background: "radial-gradient(ellipse at 30% 10%, rgba(11,83,148,0.20) 0%, transparent 70%)",
+        }}
+      />
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          width: "100%", height: "30%", bottom: 0,
+          background: "radial-gradient(ellipse at 60% 90%, rgba(0,184,224,0.08) 0%, transparent 70%)",
+        }}
+      />
+
+      {/* Hairline cian en el borde derecho */}
+      <div
+        className="absolute right-0 top-0 bottom-0 w-px pointer-events-none"
+        style={{
+          background: `linear-gradient(180deg, transparent 0%, ${BEACON}33 30%, ${BEACON}18 60%, transparent 100%)`,
+        }}
+      />
+
+      {/* ═══ Logo ═══ */}
+      <div className="relative flex items-center justify-center sb-logo-area">
+        <div className="relative flex-shrink-0 sidebar-logo">
           <Image
             src="/logo-ibc.png"
             alt="IBC Steel Group"
@@ -108,132 +208,120 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Gradient divider */}
-      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-blue-300/20 to-transparent" />
+      {/* Separador con etiqueta de sistema */}
+      <div className="relative mx-3 flex items-center gap-2">
+        <div className="flex-1" style={{ height: 1, background: `linear-gradient(90deg, ${HULL_LINE}, transparent)` }} />
+      </div>
 
-      {/* Navigation */}
-      <nav className="relative flex-1 py-4 px-2.5 space-y-1 overflow-y-auto sidebar-scroll">
-        {filteredNav.map((item, index) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
+      {/* ═══ Navegación ═══ */}
+      <nav className="relative flex-1 overflow-y-auto sidebar-scroll sb-nav">
+        {renderGroupHeader("main")}
+        <div className="sb-group">{mainItems.map(renderNavItem)}</div>
 
-          const linkContent = (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                active
-                  ? "bg-white/[0.14] text-white shadow-lg shadow-blue-950/30 backdrop-blur-sm ring-1 ring-white/[0.12]"
-                  : "text-white/80 hover:bg-white/[0.08] hover:text-white",
-                collapsed && "justify-center px-2"
-              )}
-              style={{ animationDelay: `${index * 50}ms` }}
-            >
-              <div className={cn(
-                "flex items-center justify-center h-8 w-8 rounded-lg transition-all duration-200 flex-shrink-0",
-                active
-                  ? "bg-blue-400/20 shadow-sm shadow-blue-500/10"
-                  : "bg-transparent group-hover:bg-white/5"
-              )}>
-                <Icon className={cn("h-[18px] w-[18px]", active ? "text-blue-300" : "text-blue-300/50")} />
-              </div>
-              {!collapsed && <span className="animate-slide-in-left">{item.label}</span>}
-            </Link>
-          );
+        {toolItems.length > 0 && (
+          <>
+            {renderGroupHeader("tools")}
+            <div className="sb-group">{toolItems.map(renderNavItem)}</div>
+          </>
+        )}
 
-          if (collapsed) {
-            return (
-              <Tooltip key={item.href} delayDuration={0}>
-                <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
-                <TooltipContent side="right" className="font-medium rounded-lg shadow-lg">
-                  {item.label}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-
-          return linkContent;
-        })}
+        {systemItems.length > 0 && (
+          <>
+            {renderGroupHeader("system")}
+            <div className="sb-group">{systemItems.map(renderNavItem)}</div>
+          </>
+        )}
       </nav>
 
-      {/* Collapse button */}
-      <div className="relative px-2.5 py-2">
-        <button
-          onClick={toggle}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm text-blue-300/40 hover:bg-white/[0.08] hover:text-blue-100 transition-all duration-200"
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          {!collapsed && <span>Colapsar</span>}
-        </button>
-      </div>
-
-      {/* Gradient divider */}
-      <div className="mx-4 h-px bg-gradient-to-r from-transparent via-blue-300/20 to-transparent" />
-
-      {/* User profile */}
-      <div className={cn(
-        "relative p-3 flex items-center gap-3",
-        collapsed && "justify-center p-2"
-      )}>
-        <Avatar className="h-9 w-9 ring-2 ring-blue-400/30 flex-shrink-0 shadow-md shadow-blue-950/20">
-          {profile?.avatar_url && (
-            <AvatarImage src={profile.avatar_url} alt={profile.full_name} className="object-cover" />
-          )}
-          <AvatarFallback className="bg-gradient-to-br from-blue-400/40 to-blue-600/40 text-white text-xs font-bold backdrop-blur-sm">
-            {initials}
-          </AvatarFallback>
-        </Avatar>
-        {!collapsed && (
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white truncate">{profile?.full_name || "Usuario"}</p>
-            <p className="text-[11px] text-blue-300/50 truncate font-medium">{ROLE_LABELS[userRole] || userRole}</p>
-          </div>
-        )}
-        {!collapsed && (
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <button
-                onClick={signOut}
-                className="p-1.5 rounded-lg text-blue-300/40 hover:bg-red-500/20 hover:text-red-300 transition-all duration-200"
+      {/* ═══ Perfil de usuario ═══ */}
+      <div className="relative sb-user" style={{ borderTop: `1px solid ${HULL_LINE}` }}>
+        <div className="flex items-center gap-2.5">
+          <Avatar className="sb-avatar flex-shrink-0" style={{ boxShadow: `0 0 0 1.5px rgba(0,184,224,0.25)` }}>
+            {profile?.avatar_url && (
+              <AvatarImage src={profile.avatar_url} alt={profile.full_name} className="object-cover" />
+            )}
+            <AvatarFallback
+              className="text-white text-[10px] font-bold"
+              style={{ background: "linear-gradient(135deg, rgba(11,83,148,0.55), rgba(0,184,224,0.35))" }}
+            >
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="sidebar-label flex-1 min-w-0 flex items-center gap-1.5">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-white truncate leading-tight">{profile?.full_name || "Usuario"}</p>
+              <p
+                className="text-[9px] truncate leading-tight uppercase"
+                style={{
+                  fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace",
+                  letterSpacing: "0.14em",
+                  color: "rgba(148,196,235,0.45)",
+                }}
               >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="rounded-lg">Cerrar sesión</TooltipContent>
-          </Tooltip>
-        )}
+                {ROLE_LABELS[userRole] || userRole}
+              </p>
+            </div>
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={signOut}
+                  className="p-1 rounded-md text-white/25 hover:bg-red-500/15 hover:text-red-400 transition-all duration-200"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="rounded-lg">Cerrar sesión</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
       </div>
 
-      {/* Developer credit */}
-      <div className={cn(
-        "relative px-3 pb-4 text-center",
-        collapsed && "px-1 pb-3"
-      )}>
-        {!collapsed ? (
-          <div className="credit-card mx-1 px-4 py-3 rounded-xl border border-white/8 bg-white/5 backdrop-blur-sm">
-            <p className="text-[10px] text-blue-200/30 uppercase tracking-[0.2em] mb-1 font-semibold">
-              Desarrollado por
-            </p>
-            <p
-              className="credit-name text-[13px] font-bold text-white/90 tracking-wide"
+      {/* ═══ Placa de acero: crédito + coordenadas ═══ */}
+      <div className="relative text-center sb-credit">
+        <Tooltip delayDuration={0}>
+          <TooltipTrigger asChild>
+            <div
+              className="mx-auto sb-credit-badge rounded-md flex items-center justify-center cursor-default sidebar-credit-collapsed"
               style={{
-                WebkitTextStroke: "0.3px rgba(147, 197, 253, 0.3)",
+                border: `1px solid ${HULL_LINE}`,
+                background: "rgba(255,255,255,0.03)",
               }}
             >
-              Maria Camila Mesa
-            </p>
+              <p
+                className="text-[9px] font-bold"
+                style={{
+                  fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace",
+                  color: BEACON,
+                }}
+              >
+                MCM
+              </p>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="rounded-lg sidebar-tooltip">Desarrollado por: Maria Camila Mesa</TooltipContent>
+        </Tooltip>
+        <div
+          className="mx-1.5 px-3 py-2.5 rounded-lg sidebar-credit-expanded"
+          style={{ border: `1px solid ${HULL_LINE}`, background: "rgba(255,255,255,0.025)" }}
+        >
+          <p
+            style={{ fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "0.2em" }}
+            className="text-[8.5px] text-white/25 uppercase mb-1 font-medium"
+          >
+            Desarrollado por
+          </p>
+          <p className="text-[12px] font-bold tracking-wide text-white/85">
+            Maria Camila Mesa
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-1.5">
+            <span
+              style={{ fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", color: "rgba(148,196,235,0.40)" }}
+              className="text-[8.5px] font-medium"
+            >
+              IBC CORE v1.0 · 4.71°N 74.07°W
+            </span>
           </div>
-        ) : (
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <div className="credit-card mx-auto w-9 h-9 rounded-lg border border-white/8 bg-white/5 flex items-center justify-center cursor-default">
-                <p className="credit-name text-[10px] font-bold text-white/80">MCM</p>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="rounded-lg">Desarrollado por: Maria Camila Mesa</TooltipContent>
-          </Tooltip>
-        )}
+        </div>
       </div>
     </aside>
   );

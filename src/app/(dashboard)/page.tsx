@@ -1,31 +1,35 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
-import { format, formatDistanceToNow, isPast, isToday, isTomorrow } from "date-fns";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
+import { format, formatDistanceToNow, isPast, isToday, isTomorrow, differenceInCalendarDays, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
-import {
-  AreaChart, Area, XAxis, Tooltip as ReTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
-} from "recharts";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { NotificationBell } from "@/components/layout/notification-bell";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ROLE_LABELS } from "@/lib/utils";
 
 import { T } from "@/lib/design-tokens";
+
+const BEACON = "#00B8E0";
+const BEACON_INK = "#0089A8";
+const DISPLAY_FONT = "var(--font-space-grotesk), 'Space Grotesk', sans-serif";
+const MONO_FONT = "var(--font-jetbrains-mono), 'JetBrains Mono', monospace";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
   contracts: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>,
-  factory: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M2 20h20"/><path d="M5 20V8l5 4V8l5 4V4h3a2 2 0 0 1 2 2v14"/></svg>,
   ship: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.5 0 2.5 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.4 11.4 0 0 0 21 14l-9-4-9 4c0 2.1.56 4.15 1.62 6"/><path d="M12 10V2l-3 3"/></svg>,
-  clock: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
   check: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
   dollar: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
   alert: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   zap: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
   calendar: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
   chevR: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>,
-  weight: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><path d="M6.5 8a2 2 0 0 0-1.9 1.4L2 18h20l-2.6-8.6A2 2 0 0 0 17.5 8Z"/></svg>,
+  chevDown: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>,
+  checkSm: <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
 };
 
 // ─── TYPES ───────────────────────────────────────────────────
@@ -123,26 +127,6 @@ function AnimNum({ value, prefix = "", suffix = "" }: { value: number; prefix?: 
   return <>{prefix}{display.toLocaleString("es-CO")}{suffix}</>;
 }
 
-// ─── SPARKLINE ───────────────────────────────────────────────
-function Spark({ color, data }: { color: string; data: number[] }) {
-  const chartData = data.map((v, i) => ({ v, i }));
-  return (
-    <div style={{ width: 80, height: 32 }}>
-      <ResponsiveContainer>
-        <AreaChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-          <defs>
-            <linearGradient id={`sg-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.25} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.8} fill={`url(#sg-${color.replace("#", "")})`} dot={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
 // ─── CIRCULAR PROGRESS ───────────────────────────────────────
 function CircularProgress({ pct, size = 72, stroke = 5, color = T.accent }: { pct: number; size?: number; stroke?: number; color?: string }) {
   const r = (size - stroke) / 2;
@@ -164,10 +148,10 @@ function Card({ children, delay = 0, style = {} }: { children: React.ReactNode; 
     <div style={{
       background: T.surface,
       borderRadius: T.radius,
-      border: `1px solid ${T.border}`,
+      border: `1px solid ${T.borderLight}`,
       boxShadow: T.shadow,
       animation: `dashFadeUp 0.45s ease ${delay}ms both`,
-      transition: "box-shadow 0.2s ease, transform 0.2s ease",
+      transition: "box-shadow 0.25s ease, transform 0.25s ease",
       ...style,
     }}
     onMouseEnter={(e) => { e.currentTarget.style.boxShadow = T.shadowMd; e.currentTarget.style.transform = "translateY(-2px)"; }}
@@ -175,6 +159,15 @@ function Card({ children, delay = 0, style = {} }: { children: React.ReactNode; 
     >
       {children}
     </div>
+  );
+}
+
+// ─── SECTION TITLE ───────────────────────────────────────────
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.015em", fontFamily: DISPLAY_FONT, color: T.ink }}>
+      {children}
+    </h3>
   );
 }
 
@@ -190,17 +183,6 @@ function PriorityTag({ level }: { level: string }) {
   return (
     <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: c.bg, color: c.color }}>
       {c.label}
-    </span>
-  );
-}
-
-// ─── AGING BADGE ─────────────────────────────────────────────
-function AgingBadge({ days }: { days: number }) {
-  const color = days > 30 ? T.danger : days > 15 ? T.warning : T.inkMuted;
-  const bg = days > 30 ? T.dangerBg : days > 15 ? T.warningBg : T.borderLight;
-  return (
-    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: bg, color, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
-      {days}d
     </span>
   );
 }
@@ -233,14 +215,7 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "PERÚ": "\u{1F1F5}\u{1F1EA}",
 };
 
-// ─── SPARKLINE DATA GENERATORS ───────────────────────────────
-function generateSparkData(value: number, count = 8): number[] {
-  const base = Math.max(value * 0.6, 1);
-  return Array.from({ length: count }, (_, i) => Math.round(base + (value - base) * (i / (count - 1)) + (Math.random() - 0.3) * base * 0.3));
-}
-
 // ─── METRICS CACHE ──────────────────────────────────────────
-// In-memory cache to prevent re-fetching on navigation back to dashboard
 let metricsCache: { data: MetricsData; timestamp: number } | null = null;
 const CACHE_TTL = 30_000; // 30 seconds
 
@@ -251,24 +226,26 @@ const CACHE_TTL = 30_000; // 30 seconds
 export default function DashboardPage() {
   const { profile, loading: authLoading } = useAuth();
   const [metrics, setMetrics] = useState<MetricsData | null>(() => {
-    // Initialize from cache if fresh enough
     if (metricsCache && Date.now() - metricsCache.timestamp < CACHE_TTL) {
       return metricsCache.data;
     }
     return null;
   });
   const [loading, setLoading] = useState(() => !metricsCache || Date.now() - metricsCache.timestamp >= CACHE_TTL);
+  const [selectedYears, setSelectedYears] = useState<string[]>([String(new Date().getFullYear())]);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
 
-  const fetchMetrics = useCallback(async () => {
+  const fetchMetrics = useCallback(async (yearParam?: string) => {
     try {
-      // If cache is fresh, skip fetch
-      if (metricsCache && Date.now() - metricsCache.timestamp < CACHE_TTL) {
+      const y = yearParam ?? (selectedYears.length === 1 ? selectedYears[0] : "all");
+      if (metricsCache && Date.now() - metricsCache.timestamp < CACHE_TTL && yearParam === undefined) {
         setMetrics(metricsCache.data);
         setLoading(false);
         return;
       }
       setLoading(true);
-      const res = await fetch("/api/metrics");
+      const res = await fetch(`/api/metrics?year=${y}`);
       if (!res.ok) throw new Error("Error al obtener métricas");
       const data: MetricsData = await res.json();
       metricsCache = { data, timestamp: Date.now() };
@@ -278,13 +255,42 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYears]);
 
   useEffect(() => {
     if (!authLoading) fetchMetrics();
   }, [authLoading, fetchMetrics]);
 
-  // Memoize expensive computations
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleYear = (year: string) => {
+    setSelectedYears((prev) => {
+      let next: string[];
+      if (year === "all") {
+        next = [];
+      } else if (prev.includes(year)) {
+        next = prev.filter((y) => y !== year);
+      } else {
+        next = [...prev, year];
+      }
+      metricsCache = null;
+      const apiYear = next.length === 1 ? next[0] : "all";
+      fetchMetrics(apiYear);
+      return next;
+    });
+  };
+
+  const yearLabel = selectedYears.length === 0 ? "Todos" : [...selectedYears].sort().join(", ");
+
   const computedData = useMemo(() => {
     if (!metrics) return null;
     const { kpis } = metrics;
@@ -300,19 +306,17 @@ export default function DashboardPage() {
     const stateTotal = stateData.reduce((s, d) => s + d.value, 0);
     const execPct = kpis.total_tons_agreed > 0 ? Math.round((kpis.total_tons_shipped / kpis.total_tons_agreed) * 100) : 0;
     const totalClientPending = metrics.pending_china_invoices.reduce((s, inv) => s + (inv.customer_invoice_value ?? 0), 0);
-    const maxCommercialTotal = metrics.commercial_ranking.length > 0
-      ? Math.max(...metrics.commercial_ranking.map((cr) => cr.total))
-      : 0;
 
+    // Colores calibrados para el hero navy
     const kpiCards = [
-      { label: "Contratos Activos", value: kpis.contracts_activos, icon: I.contracts, color: T.accent, bg: T.accentLight, spark: generateSparkData(kpis.contracts_activos) },
-      { label: "En Producción", value: kpis.en_produccion, icon: I.factory, color: "#F59E0B", bg: "#FFF8EB", spark: generateSparkData(kpis.en_produccion) },
-      { label: "En Tránsito", value: kpis.en_transito, icon: I.ship, color: T.blue, bg: T.blueBg, spark: generateSparkData(kpis.en_transito) },
-      { label: "Pdte. Anticipo", value: kpis.pendiente_anticipo, icon: I.clock, color: T.inkMuted, bg: T.borderLight, spark: generateSparkData(kpis.pendiente_anticipo) },
-      { label: "Entregados", value: kpis.entregados, icon: I.check, color: T.success, bg: T.successBg, spark: generateSparkData(kpis.entregados) },
+      { label: "Contratos Activos", value: kpis.contracts_activos, color: BEACON },
+      { label: "En Producción", value: kpis.en_produccion, color: "#FFB547" },
+      { label: "En Tránsito", value: kpis.en_transito, color: "#6BC1FF" },
+      { label: "Pdte. Anticipo", value: kpis.pendiente_anticipo, color: "#9FB4C8" },
+      { label: "Entregados", value: kpis.entregados, color: "#4ADE80" },
     ];
 
-    return { stateData, stateTotal, execPct, totalClientPending, maxCommercialTotal, kpiCards, kpis };
+    return { stateData, stateTotal, execPct, totalClientPending, kpiCards, kpis };
   }, [metrics]);
 
   if (authLoading || loading) {
@@ -336,130 +340,404 @@ export default function DashboardPage() {
   const { stateData, stateTotal, execPct, totalClientPending, kpiCards, kpis } = computedData;
   const greeting = getGreeting();
   const firstName = profile?.full_name?.split(" ")[0] ?? "Usuario";
-
-  // Commercial colors
-  const commColors = [T.accent, T.teal, T.violet, T.orange, T.blue, T.success, T.warning, T.danger];
+  const userRole = profile?.role || "comercial";
+  const userInitials = profile?.full_name
+    ?.split(" ")
+    .map((n: string) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || "??";
 
   return (
     <div style={{ fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif" }}>
-      {/* ── HEADER ── */}
-      <div style={{ marginBottom: 18, animation: "dashFadeUp 0.4s ease both" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
-          <div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: T.ink, letterSpacing: "-0.03em", lineHeight: 1.2 }}>
-              {greeting}, <span style={{ color: T.accent }}>{firstName}</span>
-            </h1>
-            <p style={{ fontSize: 13, color: T.inkMuted, marginTop: 4, fontWeight: 500 }}>
-              {format(new Date(), "EEEE, d 'de' MMMM yyyy", { locale: es })}
-            </p>
+
+      {/* ═══════════ HERO — PUENTE DE MANDO (compacto) ═══════════ */}
+      <div style={{
+        position: "relative", overflow: "hidden",
+        borderRadius: 20, marginBottom: 16,
+        boxShadow: "0 24px 60px -18px rgba(4,15,27,0.45), 0 8px 24px -12px rgba(4,15,27,0.3)",
+        animation: "dashFadeUp 0.5s ease both",
+      }}>
+        {/* Foto del puerto — apenas una insinuación, desaturada */}
+        <div style={{
+          position: "absolute", inset: 0,
+          backgroundImage: "url(/login-port.jpg)",
+          backgroundSize: "cover",
+          backgroundPosition: "center 42%",
+          filter: "saturate(0.55)",
+        }} />
+        {/* Duotono navy cerrado: la foto solo asoma arriba a la derecha */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(97deg, #050F1B 0%, rgba(5,18,32,0.985) 40%, rgba(6,27,46,0.95) 68%, rgba(6,27,46,0.86) 100%)",
+        }} />
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(180deg, transparent 0%, rgba(5,15,27,0.45) 55%, rgba(5,15,27,0.75) 100%)",
+        }} />
+        {/* Línea beacon */}
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: `linear-gradient(90deg, ${BEACON} 0%, rgba(0,184,224,0.25) 40%, transparent 75%)`,
+        }} />
+
+        <div style={{ position: "relative", padding: "16px 26px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            {/* Saludo */}
+            <div>
+              <h1 style={{
+                fontSize: 22, fontWeight: 600, color: "#fff", letterSpacing: "-0.02em", lineHeight: 1.15,
+                fontFamily: DISPLAY_FONT,
+              }}>
+                {greeting}, <span style={{ color: "#9CC6E8" }}>{firstName}</span>
+              </h1>
+              <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.5)", marginTop: 3, fontWeight: 500 }}>
+                {format(new Date(), "EEEE, d 'de' MMMM yyyy", { locale: es })}
+              </p>
+            </div>
+
+            {/* Controles: año + campana + usuario, sobre chip claro */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10,
+              background: "rgba(255,255,255,0.92)", backdropFilter: "blur(12px)",
+              padding: "5px 12px", borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.5)",
+              boxShadow: "0 8px 24px -8px rgba(4,15,27,0.4)",
+            }}>
+              <div ref={yearDropdownRef} style={{ position: "relative" }}>
+                <button
+                  onClick={() => setYearDropdownOpen(!yearDropdownOpen)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 10, border: `1px solid ${T.border}`,
+                    background: T.surface, color: T.ink, fontSize: 13, fontWeight: 600,
+                    cursor: "pointer", outline: "none", display: "flex", alignItems: "center", gap: 6,
+                    minWidth: 80,
+                  }}
+                >
+                  {yearLabel}
+                  <span style={{ opacity: 0.7 }}>{I.chevDown}</span>
+                </button>
+                {yearDropdownOpen && typeof document !== "undefined" && createPortal(
+                  <>
+                    <div style={{ position: "fixed", inset: 0, zIndex: 99998 }} onMouseDown={() => setYearDropdownOpen(false)} />
+                    <div onMouseDown={(e) => e.stopPropagation()} style={{
+                      position: "fixed",
+                      top: (yearDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                      left: (yearDropdownRef.current?.getBoundingClientRect().left ?? 0),
+                      zIndex: 99999,
+                      background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+                      boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
+                    }}>
+                      {[
+                        { value: "all", label: "Todos" },
+                        { value: "2026", label: "2026" },
+                        { value: "2025", label: "2025" },
+                        { value: "2024", label: "2024" },
+                      ].map((opt) => {
+                        const isAll = opt.value === "all";
+                        const isChecked = isAll ? selectedYears.length === 0 : selectedYears.includes(opt.value);
+                        return (
+                          <div
+                            key={opt.value}
+                            onClick={(e) => { e.stopPropagation(); toggleYear(opt.value); }}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                              borderRadius: 6, cursor: "pointer",
+                              background: isChecked ? T.accentLight : "transparent",
+                              transition: "background 0.15s",
+                            }}
+                            onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = T.surfaceHover; }}
+                            onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                          >
+                            <div style={{
+                              width: 16, height: 16, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                              background: isChecked ? T.accent : T.surface,
+                              border: `1.5px solid ${isChecked ? T.accent : T.border}`,
+                            }}>
+                              {isChecked && <span style={{ color: "#fff" }}>{I.checkSm}</span>}
+                            </div>
+                            <span style={{ fontSize: 13, fontWeight: isChecked ? 600 : 400, color: isChecked ? T.accent : T.ink }}>{opt.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>,
+                  document.body
+                )}
+              </div>
+              <div style={{ width: 1, height: 26, background: T.border, opacity: 0.6 }} />
+              <NotificationBell />
+              <div style={{ width: 1, height: 26, background: T.border, opacity: 0.6 }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Avatar className="h-9 w-9 ring-2 ring-blue-100/80 shadow-sm">
+                  {profile?.avatar_url && (
+                    <AvatarImage src={profile.avatar_url} alt={profile.full_name} className="object-cover" />
+                  )}
+                  <AvatarFallback className="bg-gradient-to-br from-[#0B5394] to-[#00B8E0] text-white text-xs font-bold">
+                    {userInitials}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: T.ink, lineHeight: 1.3 }}>{profile?.full_name || "Usuario"}</p>
+                  <p style={{ fontSize: 11, fontWeight: 500, color: T.inkLight }}>{ROLE_LABELS[userRole] || userRole}</p>
+                </div>
+              </div>
+            </div>
           </div>
+        </div>
+
+        {/* KPIs dentro del hero */}
+        <div style={{
+          position: "relative", display: "grid", gridTemplateColumns: "repeat(5, 1fr)",
+          marginTop: 14, borderTop: "1px solid rgba(255,255,255,0.10)",
+        }}>
+          {kpiCards.map((kpi, i) => (
+            <div
+              key={kpi.label}
+              style={{
+                padding: "12px 22px 14px",
+                borderLeft: i > 0 ? "1px solid rgba(255,255,255,0.10)" : "none",
+                animation: `dashFadeUp 0.4s ease ${200 + i * 70}ms both`,
+                display: "flex", alignItems: "center", gap: 12,
+              }}
+            >
+              <div style={{
+                fontSize: 25, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1, color: "#fff",
+                fontFamily: DISPLAY_FONT, flexShrink: 0,
+              }}>
+                <AnimNum value={kpi.value} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                <span style={{ width: 5, height: 5, borderRadius: 99, background: kpi.color, boxShadow: `0 0 8px ${kpi.color}66`, flexShrink: 0 }} />
+                <span style={{
+                  fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.60)",
+                  textTransform: "uppercase", letterSpacing: "0.12em", whiteSpace: "nowrap",
+                  overflow: "hidden", textOverflow: "ellipsis",
+                  fontFamily: MONO_FONT,
+                }}>{kpi.label}</span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ── KPI ROW ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 16 }}>
-        {kpiCards.map((kpi, i) => (
-          <Card key={kpi.label} delay={100 + i * 60} style={{ padding: "20px 22px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: 12,
-                background: kpi.bg, display: "flex", alignItems: "center", justifyContent: "center",
-                color: kpi.color,
-              }}>{kpi.icon}</div>
-              <Spark color={kpi.color} data={kpi.spark} />
+      {/* ═══════════ TABLERO DE ARRIBOS ═══════════ */}
+      <div style={{
+        position: "relative", overflow: "hidden",
+        borderRadius: T.radius, marginBottom: 16,
+        background: T.surface,
+        border: `1px solid ${T.borderLight}`,
+        boxShadow: T.shadow,
+        animation: "dashFadeUp 0.5s ease 250ms both",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "15px 26px", borderBottom: `1px solid ${T.borderLight}`,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ color: T.accent }}>{I.ship}</span>
+            <span style={{
+              fontSize: 12, fontWeight: 600, color: T.ink, textTransform: "uppercase",
+              letterSpacing: "0.2em", fontFamily: MONO_FONT,
+            }}>
+              Tablero de arribos
+            </span>
+            {metrics.upcoming_etas.length > 0 && (
+              <span style={{
+                padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                background: T.beaconBg, color: BEACON_INK, fontFamily: MONO_FONT,
+              }}>
+                {metrics.upcoming_etas.length}
+              </span>
+            )}
+          </div>
+          <Link href="/shipments?filter=en_transito" style={{
+            fontSize: 12, color: T.accent, fontWeight: 600, textDecoration: "none",
+            display: "flex", alignItems: "center", gap: 3,
+          }}>
+            Ver embarques {I.chevR}
+          </Link>
+        </div>
+
+        {metrics.upcoming_etas.length === 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "42px 0", color: T.inkLight }}>
+            <span style={{ marginBottom: 8 }}>{I.ship}</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Sin embarques en tránsito</span>
+          </div>
+        ) : (
+          <>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1.3fr 1.5fr 1.1fr 0.6fr 0.9fr 0.7fr",
+              padding: "10px 26px 8px", gap: 12, background: T.surfaceAlt,
+            }}>
+              {["Motonave", "Cliente", "Contrato", "País", "ETA", "Días"].map((h, idx) => (
+                <span key={h} style={{
+                  fontSize: 9, fontWeight: 600, color: T.inkLight,
+                  textTransform: "uppercase", letterSpacing: "0.18em", fontFamily: MONO_FONT,
+                  textAlign: idx >= 4 ? "right" : "left",
+                }}>{h}</span>
+              ))}
             </div>
-            <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: T.ink }}>
-              <AnimNum value={kpi.value} />
+
+            <div style={{ maxHeight: 320, overflowY: "auto", paddingBottom: 8 }}>
+              {metrics.upcoming_etas.map((arr, i) => {
+                const flag = arr.country ? (COUNTRY_FLAGS[arr.country.toUpperCase()] || "") : "";
+                const days = arr.eta_final ? differenceInCalendarDays(parseISO(arr.eta_final.split("T")[0]), new Date()) : null;
+                const daysColor = days === null ? T.inkLight : days < 0 ? T.danger : days <= 3 ? T.warning : BEACON_INK;
+                const daysBg = days === null ? "transparent" : days < 0 ? T.dangerBg : days <= 3 ? T.warningBg : T.beaconBg;
+                const daysLabel = days === null ? "—" : days < 0 ? `${Math.abs(days)}d atraso` : days === 0 ? "HOY" : `${days}d`;
+                return (
+                  <div key={arr.id} style={{
+                    display: "grid", gridTemplateColumns: "1.3fr 1.5fr 1.1fr 0.6fr 0.9fr 0.7fr",
+                    alignItems: "center", gap: 12,
+                    padding: "12px 26px",
+                    borderTop: `1px solid ${T.borderLight}`,
+                    animation: `dashSlideRight 0.3s ease ${350 + i * 50}ms both`,
+                    transition: "background 0.15s ease",
+                    cursor: "default",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(11,83,148,0.03)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <span style={{
+                      fontSize: 13.5, fontWeight: 600, color: T.accent, fontFamily: DISPLAY_FONT,
+                      letterSpacing: "0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {(arr.vessel_name || "Sin motonave").toUpperCase()}
+                    </span>
+                    <span style={{ fontSize: 12.5, color: T.inkSoft, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {arr.client_name}
+                    </span>
+                    <span style={{ fontSize: 12, color: T.inkMuted, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {arr.client_contract || "—"}
+                    </span>
+                    <span style={{ fontSize: 15 }}>{flag}</span>
+                    <span style={{ fontSize: 12.5, color: T.ink, fontFamily: MONO_FONT, fontWeight: 700, textAlign: "right" }}>
+                      {arr.eta_final ? format(new Date(arr.eta_final), "dd MMM", { locale: es }).toUpperCase() : "—"}
+                    </span>
+                    <span style={{ textAlign: "right" }}>
+                      <span style={{
+                        display: "inline-block",
+                        fontSize: 10.5, fontWeight: 700, fontFamily: MONO_FONT,
+                        color: daysColor, background: daysBg,
+                        padding: "2px 8px", borderRadius: 6,
+                      }}>
+                        {daysLabel}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: T.inkMuted, marginTop: 5, letterSpacing: "0.01em" }}>
-              {kpi.label}
-            </div>
-          </Card>
-        ))}
+          </>
+        )}
       </div>
 
-      {/* ── ROW 2: Tonnage + Execution + Command Center ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.4fr", gap: 14, marginBottom: 16 }}>
+      {/* ═══════════ ROW: Carga + Financiero + Centro de Mando ═══════════ */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1.3fr", gap: 14, marginBottom: 16 }}>
 
-        {/* Tonnage Card */}
+        {/* Carga & Estados */}
         <Card delay={400} style={{ padding: "22px 24px" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 18 }}>Tonelaje</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.inkMuted }}>Acordadas</span>
-                <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em" }}>
-                  <AnimNum value={Math.round(kpis.total_tons_agreed)} />
-                  <span style={{ fontSize: 11, color: T.inkLight, marginLeft: 3 }}>t</span>
-                </span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: T.borderLight, overflow: "hidden" }}>
-                <div style={{ height: "100%", borderRadius: 3, background: `linear-gradient(90deg, ${T.accent}, ${T.accentVivid})`, width: "100%", animation: "dashProgressFill 1s ease 500ms both" }} />
+          <SectionTitle>Carga & Estados</SectionTitle>
+          <div style={{ display: "flex", alignItems: "center", gap: 22, marginTop: 18 }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <CircularProgress pct={execPct} size={96} stroke={7} color={BEACON} />
+              <div style={{ position: "absolute", textAlign: "center" }}>
+                <div style={{ fontSize: 21, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1, fontFamily: DISPLAY_FONT }}>{execPct}%</div>
+                <div style={{ fontSize: 9, color: T.inkMuted, fontWeight: 600, marginTop: 2 }}>Embarcado</div>
               </div>
             </div>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: T.inkMuted }}>Embarcadas</span>
-                <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em" }}>
-                  <AnimNum value={Math.round(kpis.total_tons_shipped)} />
-                  <span style={{ fontSize: 11, color: T.inkLight, marginLeft: 3 }}>t</span>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.08em" }}>Acordadas</span>
+                <span style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO_FONT, letterSpacing: "-0.02em", color: T.accent }}>
+                  <AnimNum value={Math.round(kpis.total_tons_agreed)} /> t
                 </span>
               </div>
-              <div style={{ height: 6, borderRadius: 3, background: T.borderLight, overflow: "hidden" }}>
-                <div style={{ height: "100%", borderRadius: 3, background: `linear-gradient(90deg, ${T.teal}, #34D399)`, width: `${execPct}%`, animation: "dashProgressFill 1s ease 600ms both" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderTop: `1px solid ${T.borderLight}`, paddingTop: 10 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.08em" }}>Embarcadas</span>
+                <span style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO_FONT, letterSpacing: "-0.02em", color: BEACON_INK }}>
+                  <AnimNum value={Math.round(kpis.total_tons_shipped)} /> t
+                </span>
               </div>
             </div>
           </div>
+
+          {/* Barra de distribución tipo estiba */}
+          {stateData.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: "flex", height: 14, borderRadius: 7, overflow: "hidden", gap: 2 }}>
+                {stateData.map((s, i) => (
+                  <div key={i} style={{
+                    width: `${(s.value / stateTotal) * 100}%`,
+                    background: s.color, minWidth: 8,
+                    animation: `dashFadeUp 0.5s ease ${500 + i * 80}ms both`,
+                  }} />
+                ))}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 12 }}>
+                {stateData.map((s, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 3, background: s.color, display: "inline-block" }} />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.inkMuted }}>{s.name}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: T.ink, fontFamily: MONO_FONT }}>{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
 
-        {/* Financial Summary */}
+        {/* Resumen Financiero */}
         <Card delay={450} style={{ padding: "22px 24px" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 18 }}>Resumen Financiero</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {/* Customer value */}
+          <SectionTitle>Resumen Financiero</SectionTitle>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: T.inkMuted }}>Facturación Cliente</span>
-              <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em", color: T.success }}>
-                $<AnimNum value={Math.round(kpis.total_customer_value)} />
+              <span style={{ fontSize: 15, fontWeight: 800, fontFamily: MONO_FONT, letterSpacing: "-0.02em", color: T.success }}>
+                USD <AnimNum value={Math.round(kpis.total_customer_value)} />
               </span>
             </div>
-            {/* China cost */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: T.inkMuted }}>Costo China</span>
-              <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em", color: T.ink }}>
-                $<AnimNum value={Math.round(kpis.total_china_value)} />
+              <span style={{ fontSize: 15, fontWeight: 800, fontFamily: MONO_FONT, letterSpacing: "-0.02em", color: T.ink }}>
+                USD <AnimNum value={Math.round(kpis.total_china_value)} />
               </span>
             </div>
-            {/* Margin */}
             <div style={{ borderTop: `1px solid ${T.borderLight}`, paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: T.ink }}>Margen Bruto</span>
-              <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em", color: (kpis.total_customer_value - kpis.total_china_value) >= 0 ? T.success : T.danger }}>
-                $<AnimNum value={Math.round(kpis.total_customer_value - kpis.total_china_value)} />
+              <span style={{ fontSize: 15, fontWeight: 800, fontFamily: MONO_FONT, letterSpacing: "-0.02em", color: (kpis.total_customer_value - kpis.total_china_value) >= 0 ? T.success : T.danger }}>
+                USD <AnimNum value={Math.round(kpis.total_customer_value - kpis.total_china_value)} />
               </span>
             </div>
-            {/* Invoices summary */}
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              <div style={{ flex: 1, padding: "8px 10px", borderRadius: T.radiusSm, background: T.successBg, textAlign: "center" }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: T.success, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
-                  <AnimNum value={kpis.approved_invoices} />
+            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: T.radiusSm, background: T.successBg + "80" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.success, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: T.success, fontFamily: MONO_FONT, lineHeight: 1 }}>
+                    <AnimNum value={kpis.approved_invoices} />
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: T.success, marginTop: 2, opacity: 0.8 }}>Aprobadas</div>
                 </div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: T.success, marginTop: 2 }}>Aprobadas</div>
               </div>
-              <div style={{ flex: 1, padding: "8px 10px", borderRadius: T.radiusSm, background: T.dangerBg, textAlign: "center" }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: T.danger, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
-                  <AnimNum value={kpis.pending_invoices} />
+              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: T.radiusSm, background: T.dangerBg + "80" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.danger, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: T.danger, fontFamily: MONO_FONT, lineHeight: 1 }}>
+                    <AnimNum value={kpis.pending_invoices} />
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: T.danger, marginTop: 2, opacity: 0.8 }}>Pendientes</div>
                 </div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: T.danger, marginTop: 2 }}>Pendientes</div>
               </div>
             </div>
           </div>
         </Card>
 
-        {/* Command Center - Tasks */}
+        {/* Centro de Mando */}
         <Card delay={500} style={{ padding: "22px 24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>Centro de Mando</h3>
+              <SectionTitle>Centro de Mando</SectionTitle>
               {metrics.pending_reminders.length > 0 && (
                 <span style={{ padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: T.dangerBg, color: T.danger }}>
                   {metrics.pending_reminders.length}
@@ -470,7 +748,7 @@ export default function DashboardPage() {
               Ver todo {I.chevR}
             </Link>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 210, overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 230, overflowY: "auto" }}>
             {metrics.pending_reminders.length === 0 ? (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "30px 0", color: T.inkLight }}>
                 <div style={{ width: 42, height: 42, borderRadius: 12, background: T.successBg, display: "flex", alignItems: "center", justifyContent: "center", color: T.success, marginBottom: 8 }}>{I.check}</div>
@@ -499,7 +777,7 @@ export default function DashboardPage() {
                     </div>
                     <div style={{
                       fontSize: 11, fontWeight: 600, color: dueInfo.urgent ? T.danger : T.inkMuted,
-                      fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", whiteSpace: "nowrap",
+                      fontFamily: MONO_FONT, whiteSpace: "nowrap",
                     }}>{dueInfo.label}</div>
                   </div>
                 );
@@ -509,134 +787,13 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* ── ROW 3: State Distribution + Próximos Arribos ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1.2fr", gap: 14, marginBottom: 16 }}>
-
-        {/* State Distribution */}
-        <Card delay={600} style={{ padding: "22px 24px" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 20 }}>Distribución por Estado</h3>
-          {stateData.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 180, color: T.inkLight, fontSize: 13 }}>Sin datos</div>
-          ) : (
-            <>
-              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-                <div style={{ position: "relative", width: 180, height: 180 }}>
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={stateData} dataKey="value" cx="50%" cy="50%" innerRadius={58} outerRadius={82} paddingAngle={3} strokeWidth={0}>
-                        {stateData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center" }}>
-                    <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, letterSpacing: "-0.03em" }}>{stateTotal}</div>
-                    <div style={{ fontSize: 10, color: T.inkMuted, fontWeight: 600, marginTop: 2 }}>TOTAL</div>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {stateData.map((s, i) => {
-                  const pct = ((s.value / stateTotal) * 100).toFixed(1);
-                  return (
-                    <div key={i} style={{ animation: `dashSlideRight 0.3s ease ${700 + i * 60}ms both` }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 3, background: s.color, display: "inline-block" }} />
-                          <span style={{ fontSize: 12.5, fontWeight: 500, color: T.inkSoft }}>{s.name}</span>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>{s.value}</span>
-                          <span style={{ fontSize: 11, color: T.inkLight, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", minWidth: 38, textAlign: "right" }}>{pct}%</span>
-                        </div>
-                      </div>
-                      <div style={{ height: 4, borderRadius: 2, background: T.borderLight, overflow: "hidden" }}>
-                        <div style={{ height: "100%", borderRadius: 2, background: s.color, width: `${pct}%`, animation: `dashProgressFill 1s ease ${800 + i * 80}ms both` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </Card>
-
-        {/* Próximos Arribos */}
-        <Card delay={700} style={{ padding: "22px 24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>Próximos Arribos</h3>
-              {metrics.upcoming_etas.length > 0 && (
-                <span style={{ padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: T.accentLight, color: T.accent }}>
-                  {metrics.upcoming_etas.length}
-                </span>
-              )}
-            </div>
-            <Link href="/shipments?filter=en_transito" style={{ fontSize: 12, color: T.accent, fontWeight: 600, textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
-              Ver todos {I.chevR}
-            </Link>
-          </div>
-          {metrics.upcoming_etas.length === 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 0", color: T.inkLight }}>
-              <div style={{ width: 42, height: 42, borderRadius: 12, background: T.blueBg, display: "flex", alignItems: "center", justifyContent: "center", color: T.blue, marginBottom: 8 }}>{I.ship}</div>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Sin embarques pendientes</span>
-            </div>
-          ) : (
-            <div style={{ maxHeight: 340, overflowY: "auto" }}>
-              {metrics.upcoming_etas.map((arr, i) => {
-                const flag = arr.country ? (COUNTRY_FLAGS[arr.country] || "") : "";
-                return (
-                  <div key={arr.id} className="dash-hover-glow" style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "14px 8px", borderRadius: T.radiusSm, margin: "0 -8px",
-                    borderBottom: i < metrics.upcoming_etas.length - 1 ? `1px solid ${T.borderLight}` : "none",
-                    animation: `dashSlideRight 0.3s ease ${800 + i * 60}ms both`, cursor: "pointer",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <div style={{
-                        width: 42, height: 42, borderRadius: 12,
-                        background: T.blueBg, border: `1px solid ${T.blue}20`,
-                        display: "flex", alignItems: "center", justifyContent: "center", color: T.blue,
-                      }}>{I.ship}</div>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 800 }}>{arr.client_name}</span>
-                          {flag && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: T.borderLight, color: T.inkMuted }}>{flag}</span>}
-                        </div>
-                        <div style={{ fontSize: 11, color: T.inkLight }}>
-                          <span style={{ fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", fontWeight: 500 }}>{arr.client_contract || "N/A"}</span>
-                          <span style={{ margin: "0 6px", color: T.border }}>·</span>
-                          {arr.vessel_name || "Sin motonave"}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
-                        {arr.eta_final ? format(new Date(arr.eta_final), "dd MMM yyyy", { locale: es }) : "—"}
-                      </div>
-                      <span style={{
-                        display: "inline-flex", alignItems: "center", gap: 4,
-                        padding: "2px 9px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                        color: T.teal, background: T.tealBg,
-                      }}>
-                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: T.teal, display: "inline-block", animation: "dashDotPulse 2s ease infinite" }} />
-                        En tránsito
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* ── ROW 4: Facturas Pendientes + Contratos por Comercial ── */}
+      {/* ═══════════ ROW: Facturas Pendientes + Contratos por Comercial ═══════════ */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 14, marginBottom: 16 }}>
 
         {/* Facturas Pendientes */}
         <Card delay={900} style={{ padding: "18px 22px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>Facturas Pendientes</h3>
+            <SectionTitle>Facturas Pendientes</SectionTitle>
             <Link href="/invoices?tab=china&status=pending" style={{ fontSize: 12, color: T.accent, fontWeight: 600, textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
               Ver todas {I.chevR}
             </Link>
@@ -649,23 +806,21 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              {/* Summary banner */}
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "8px 14px", borderRadius: T.radiusSm, marginBottom: 10, marginTop: 6,
-                background: `linear-gradient(135deg, ${T.dangerBg}, ${T.warningBg})`,
-                border: `1px solid ${T.danger}15`,
+                background: T.dangerBg + "70",
+                border: `1px solid ${T.danger}20`,
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ color: T.danger }}>{I.alert}</span>
                   <span style={{ fontSize: 11, fontWeight: 600 }}>{metrics.pending_china_invoices.length} pendientes</span>
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", letterSpacing: "-0.02em" }}>
-                  US$ {totalClientPending.toLocaleString("es-CO", { minimumFractionDigits: 2 })}
+                <span style={{ fontSize: 14, fontWeight: 800, fontFamily: MONO_FONT, letterSpacing: "-0.02em" }}>
+                  USD {totalClientPending.toLocaleString("es-CO", { minimumFractionDigits: 2 })}
                 </span>
               </div>
 
-              {/* Header row */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 0.7fr", padding: "0 0 6px", borderBottom: `1px solid ${T.border}` }}>
                 {["Contrato Cliente", "Cliente", "Valor Cliente"].map(h => (
                   <span key={h} style={{ fontSize: 9, fontWeight: 700, color: T.inkLight, letterSpacing: "0.06em", textTransform: "uppercase", textAlign: h === "Valor Cliente" ? "right" : "left" }}>{h}</span>
@@ -681,7 +836,7 @@ export default function DashboardPage() {
                     animation: `dashSlideRight 0.3s ease ${1000 + i * 40}ms both`, cursor: "pointer",
                   }}>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, fontFamily: MONO_FONT }}>
                         {inv.customer_contract || inv.china_invoice_number || "—"}
                       </div>
                       <div style={{ fontSize: 9, color: T.inkLight, marginTop: 1 }}>
@@ -689,8 +844,8 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <span style={{ fontSize: 11.5, fontWeight: 600, color: T.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.customer_name || "—"}</span>
-                    <span style={{ fontSize: 12.5, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", textAlign: "right" }}>
-                      ${(inv.customer_invoice_value ?? 0).toLocaleString("es-CO", { minimumFractionDigits: 0 })}
+                    <span style={{ fontSize: 12.5, fontWeight: 800, fontFamily: MONO_FONT, textAlign: "right" }}>
+                      USD {(inv.customer_invoice_value ?? 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 ))}
@@ -703,7 +858,7 @@ export default function DashboardPage() {
         {metrics.filters.role !== "comercial" && (
           <Card delay={1000} style={{ padding: "22px 24px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>Contratos por Comercial</h3>
+              <SectionTitle>Contratos por Comercial</SectionTitle>
               <Link href="/contracts" style={{ fontSize: 12, color: T.accent, fontWeight: 600, textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
                 Detalle {I.chevR}
               </Link>
@@ -713,42 +868,45 @@ export default function DashboardPage() {
             ) : (
               <div style={{ maxHeight: 340, overflowY: "auto" }}>
                 {metrics.commercial_ranking.map((c, i) => {
-                  const color = commColors[i % commColors.length];
                   const initials = c.name.split(" ").map((w) => w[0]).join("").slice(0, 2);
-                  const pct = computedData.maxCommercialTotal > 0 ? Math.round((c.total / computedData.maxCommercialTotal) * 100) : 0;
+                  const maxTotal = Math.max(...metrics.commercial_ranking.map((r) => r.total), 1);
                   return (
                     <div key={i} className="dash-hover-glow" style={{
-                      display: "grid", gridTemplateColumns: "1.5fr 0.4fr 0.6fr 0.9fr 1fr",
-                      alignItems: "center", padding: "12px 8px", borderRadius: T.radiusSm,
+                      display: "flex", alignItems: "center", gap: 14, padding: "12px 10px", borderRadius: T.radiusSm,
                       borderBottom: i < metrics.commercial_ranking.length - 1 ? `1px solid ${T.borderLight}` : "none",
                       animation: `dashSlideRight 0.3s ease ${1100 + i * 60}ms both`, cursor: "pointer",
-                      margin: "0 -8px",
+                      margin: "0 -10px",
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{
-                          width: 34, height: 34, borderRadius: 9,
-                          background: color + "12", color: color,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 11, fontWeight: 800, letterSpacing: "-0.02em",
-                        }}>{initials}</div>
-                        <span style={{ fontSize: 13, fontWeight: 700 }}>{c.name}</span>
-                      </div>
-                      <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", textAlign: "center" }}>{c.total}</span>
-                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                        <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: T.blueBg, color: T.blue }}>{c.en_produccion}</span>
-                        <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: T.tealBg, color: T.teal }}>{c.en_transito}</span>
-                      </div>
-                      <span style={{ fontSize: 12, color: T.inkMuted, fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace", fontWeight: 500, textAlign: "right" }}>
-                        {c.tons_agreed.toLocaleString("es-CO", { maximumFractionDigits: 0 })} t
-                      </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <div style={{ flex: 1, height: 5, borderRadius: 3, background: T.borderLight, overflow: "hidden" }}>
+                      <div style={{
+                        width: 38, height: 38, borderRadius: 10,
+                        background: T.accentLight, color: T.accent,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 12, fontWeight: 800, letterSpacing: "-0.02em", flexShrink: 0,
+                        fontFamily: DISPLAY_FONT,
+                      }}>{initials}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: T.ink }}>{c.name}</span>
+                          <span style={{ fontSize: 19, fontWeight: 600, fontFamily: DISPLAY_FONT, color: T.accent }}>{c.total}</span>
+                        </div>
+                        <div style={{ height: 5, borderRadius: 3, background: T.borderLight, overflow: "hidden", marginBottom: 7 }}>
                           <div style={{
-                            height: "100%", borderRadius: 3, background: `linear-gradient(90deg, ${color}, ${color}aa)`,
-                            width: `${pct}%`, animation: `dashProgressFill 1s ease ${1200 + i * 80}ms both`,
+                            height: "100%", width: `${(c.total / maxTotal) * 100}%`,
+                            background: `linear-gradient(90deg, ${T.accent}, ${BEACON})`,
+                            borderRadius: 3,
+                            animation: "dashProgressFill 0.9s ease both",
                           }} />
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, minWidth: 32, textAlign: "right", fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>{pct}%</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 10.5, color: T.inkMuted, fontWeight: 600 }}>{c.en_produccion} producción</span>
+                          <span style={{ color: T.inkGhost }}>·</span>
+                          <span style={{ fontSize: 10.5, color: T.inkMuted, fontWeight: 600 }}>{c.en_transito} tránsito</span>
+                          <span style={{ color: T.inkGhost }}>·</span>
+                          <span style={{ fontSize: 10.5, color: T.inkMuted, fontWeight: 600 }}>{c.entregados} entregados</span>
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: T.inkMuted, fontFamily: MONO_FONT, fontWeight: 500 }}>
+                            {c.tons_agreed.toLocaleString("es-CO", { maximumFractionDigits: 0 })} t
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );
@@ -759,18 +917,17 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* ── ROW 5: Quick Access + Activity ── */}
+      {/* ═══════════ ROW: Acceso Rápido + Actividad ═══════════ */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
 
-        {/* Quick Access */}
         <Card delay={1200} style={{ padding: "22px 24px" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 14 }}>Acceso Rápido</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <SectionTitle>Acceso Rápido</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
             {[
-              { label: "Facturas", icon: I.dollar, color: T.accent, bg: T.accentLight, href: "/invoices" },
-              { label: "Embarques", icon: I.ship, color: T.teal, bg: T.tealBg, href: "/shipments" },
-              { label: "Reportes", icon: I.zap, color: T.violet, bg: T.violetBg, href: "/reports" },
-              { label: "Calendario", icon: I.calendar, color: T.warning, bg: T.warningBg, href: "/calendar" },
+              { label: "Facturas", icon: I.dollar, href: "/invoices" },
+              { label: "Embarques", icon: I.ship, href: "/shipments" },
+              { label: "Reportes", icon: I.zap, href: "/reports" },
+              { label: "Calendario", icon: I.calendar, href: "/calendar" },
             ].map((a, i) => (
               <Link key={i} href={a.href} style={{ textDecoration: "none" }}>
                 <button className="dash-hover-glow" style={{
@@ -780,7 +937,7 @@ export default function DashboardPage() {
                   fontSize: 12.5, fontWeight: 700, color: T.ink, textAlign: "left",
                   transition: "all 0.15s ease",
                 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 8, background: a.bg, display: "flex", alignItems: "center", justifyContent: "center", color: a.color, flexShrink: 0 }}>{a.icon}</div>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: T.accentLight, display: "flex", alignItems: "center", justifyContent: "center", color: T.accent, flexShrink: 0 }}>{a.icon}</div>
                   {a.label}
                 </button>
               </Link>
@@ -788,36 +945,31 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Recent Activity */}
         <Card delay={1300} style={{ padding: "22px 24px", display: "flex", flexDirection: "column" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", marginBottom: 14 }}>Actividad Reciente</h3>
+          <SectionTitle>Actividad Reciente</SectionTitle>
           {metrics.recent_activity.length === 0 ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, color: T.inkLight, padding: "30px 0" }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>Sin actividad reciente</span>
             </div>
           ) : (
-            <div style={{ flex: 1 }}>
-              {metrics.recent_activity.map((act, i) => {
-                const colors = [T.accent, T.teal, T.violet, T.orange, T.blue, T.success];
-                const dotColor = colors[i % colors.length];
-                return (
-                  <div key={act.id} style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "9px 0",
-                    borderBottom: i < metrics.recent_activity.length - 1 ? `1px solid ${T.borderLight}` : "none",
-                  }}>
-                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                    <div style={{ flex: 1, fontSize: 12, color: T.inkMuted, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 700, color: T.ink }}>{act.user_name ?? "Sistema"}</span>{" "}
-                      {ACTION_LABELS[act.action] ?? act.action}{" "}
-                      <span style={{ color: T.accent, fontWeight: 600 }}>{TABLE_LABELS[act.table_name] ?? act.table_name}</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: T.inkLight, whiteSpace: "nowrap", fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace" }}>
-                      {formatDistanceToNow(new Date(act.created_at), { locale: es, addSuffix: true })}
-                    </span>
+            <div style={{ flex: 1, marginTop: 10 }}>
+              {metrics.recent_activity.map((act, i) => (
+                <div key={act.id} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 0",
+                  borderBottom: i < metrics.recent_activity.length - 1 ? `1px solid ${T.borderLight}` : "none",
+                }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.accent, flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: 12, color: T.inkMuted, lineHeight: 1.4 }}>
+                    <span style={{ fontWeight: 700, color: T.ink }}>{act.user_name ?? "Sistema"}</span>{" "}
+                    {ACTION_LABELS[act.action] ?? act.action}{" "}
+                    <span style={{ color: T.accent, fontWeight: 600 }}>{TABLE_LABELS[act.table_name] ?? act.table_name}</span>
                   </div>
-                );
-              })}
+                  <span style={{ fontSize: 10, color: T.inkLight, whiteSpace: "nowrap", fontFamily: MONO_FONT }}>
+                    {formatDistanceToNow(new Date(act.created_at), { locale: es, addSuffix: true })}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </Card>

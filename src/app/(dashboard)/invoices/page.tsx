@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,9 +20,11 @@ import {
   Trash2,
   CalendarIcon,
   Loader2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FileText,
+  Check,
   CheckCircle2,
   Receipt,
   Users,
@@ -372,6 +375,14 @@ export default function InvoicesPage() {
 
   // Client search state
   const [clientSearch, setClientSearch] = useState("");
+  const [chinaClientSearch, setChinaClientSearch] = useState("");
+  const [chinaClientAdding, setChinaClientAdding] = useState(false);
+  const [chinaCustomClients, setChinaCustomClients] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try { return JSON.parse(localStorage.getItem("ibc-custom-clients-invoices") || "[]"); } catch { return []; }
+    }
+    return [];
+  });
 
   // =====================================================
   // === CHINA STATE ===
@@ -398,10 +409,36 @@ export default function InvoicesPage() {
   const [chinaDownloading, setChinaDownloading] = useState(false);
   const [chinaCurrentPage, setChinaCurrentPage] = useState(1);
 
+  // Year multiselect state
+  const [selectedYears, setSelectedYears] = useState<string[]>([String(new Date().getFullYear())]);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
+
   // China sheet state
   const [chinaSheetOpen, setChinaSheetOpen] = useState(false);
   const [chinaEditingInvoice, setChinaEditingInvoice] = useState<ContractInvoice | null>(null);
   const [chinaFormData, setChinaFormData] = useState<ContractInvoiceFormData>({ ...CHINA_EMPTY_FORM });
+
+  // Year dropdown outside-click handler
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Year toggle function
+  const toggleYear = (year: string) => {
+    setSelectedYears((prev) => {
+      if (year === "all") return [];
+      if (prev.includes(year)) return prev.filter((y) => y !== year);
+      return [...prev, year];
+    });
+  };
+  const yearLabel = selectedYears.length === 0 ? "Todos" : [...selectedYears].sort().join(", ");
 
   // =====================================================
   // COMERCIALES: Data Fetching
@@ -416,6 +453,18 @@ export default function InvoicesPage() {
       else if (commFilterStatus.length > 1) params.set("payment_status", commFilterStatus.join(","));
       if (commFilterDateFrom) params.set("date_from", commFilterDateFrom);
       if (commFilterDateTo) params.set("date_to", commFilterDateTo);
+
+      // Year filter
+      if (!commFilterDateFrom && !commFilterDateTo) {
+        if (selectedYears.length === 1) {
+          params.set("date_from", `${selectedYears[0]}-01-01`);
+          params.set("date_to", `${selectedYears[0]}-12-31`);
+        } else if (selectedYears.length > 1) {
+          const sorted = [...selectedYears].sort();
+          params.set("date_from", `${sorted[0]}-01-01`);
+          params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+        }
+      }
 
       const res = await fetch(`/api/invoices?${params.toString()}`);
       const json = await res.json();
@@ -439,7 +488,7 @@ export default function InvoicesPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, commFilterStatus, commFilterDateFrom, commFilterDateTo, commFilterClient]);
+  }, [searchTerm, commFilterStatus, commFilterDateFrom, commFilterDateTo, commFilterClient, selectedYears]);
 
   const fetchReferenceData = useCallback(async () => {
     try {
@@ -856,6 +905,19 @@ export default function InvoicesPage() {
       )
     : clients;
 
+  const chinaAllClients = Array.from(new Set([
+    ...chinaFilterOptions.customer_names,
+    ...chinaCustomClients,
+  ])).sort();
+
+  const chinaAddCustomClient = (name: string) => {
+    const trimmed = name.trim().toUpperCase();
+    if (!trimmed || chinaAllClients.includes(trimmed)) return;
+    const updated = [...chinaCustomClients, trimmed];
+    setChinaCustomClients(updated);
+    localStorage.setItem("ibc-custom-clients-invoices", JSON.stringify(updated));
+  };
+
   // =====================================================
   // === CHINA: Data Fetching ===
   // =====================================================
@@ -881,6 +943,19 @@ export default function InvoicesPage() {
       }
       if (chinaFilterDateFrom) params.set("date_from", chinaFilterDateFrom);
       if (chinaFilterDateTo) params.set("date_to", chinaFilterDateTo);
+
+      // Year filter
+      if (!chinaFilterDateFrom && !chinaFilterDateTo) {
+        if (selectedYears.length === 1) {
+          params.set("date_from", `${selectedYears[0]}-01-01`);
+          params.set("date_to", `${selectedYears[0]}-12-31`);
+        } else if (selectedYears.length > 1) {
+          const sorted = [...selectedYears].sort();
+          params.set("date_from", `${sorted[0]}-01-01`);
+          params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+        }
+      }
+
       params.set("page", String(chinaCurrentPage));
       params.set("pageSize", String(CHINA_ITEMS_PER_PAGE));
 
@@ -899,7 +974,7 @@ export default function InvoicesPage() {
     } finally {
       setChinaLoading(false);
     }
-  }, [chinaDebouncedSearch, chinaFilterClient, chinaFilterStatus, chinaFilterDateFrom, chinaFilterDateTo, chinaCurrentPage]);
+  }, [chinaDebouncedSearch, chinaFilterClient, chinaFilterStatus, chinaFilterDateFrom, chinaFilterDateTo, chinaCurrentPage, selectedYears]);
 
   const fetchChinaFilterOptions = useCallback(async () => {
     try {
@@ -955,6 +1030,7 @@ export default function InvoicesPage() {
   const chinaResetForm = useCallback(() => {
     setChinaFormData({ ...CHINA_EMPTY_FORM });
     setChinaEditingInvoice(null);
+    setChinaClientSearch("");
   }, []);
 
   const openCreateChinaForm = () => {
@@ -1196,6 +1272,19 @@ export default function InvoicesPage() {
       }
       if (chinaFilterDateFrom) params.set("date_from", chinaFilterDateFrom);
       if (chinaFilterDateTo) params.set("date_to", chinaFilterDateTo);
+
+      // Year filter for export
+      if (!chinaFilterDateFrom && !chinaFilterDateTo) {
+        if (selectedYears.length === 1) {
+          params.set("date_from", `${selectedYears[0]}-01-01`);
+          params.set("date_to", `${selectedYears[0]}-12-31`);
+        } else if (selectedYears.length > 1) {
+          const sorted = [...selectedYears].sort();
+          params.set("date_from", `${sorted[0]}-01-01`);
+          params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+        }
+      }
+
       params.set("page", "1");
       params.set("pageSize", "5000");
 
@@ -1264,7 +1353,6 @@ export default function InvoicesPage() {
 
       // ROW 1: Unified header
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
@@ -1284,7 +1372,6 @@ export default function InvoicesPage() {
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
       r2.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -1347,7 +1434,7 @@ export default function InvoicesPage() {
           // Value columns right-aligned (col 4, 6)
           if (colNumber === 4 || colNumber === 6) {
             cell.alignment = { horizontal: "right", vertical: "middle" };
-            if (typeof cell.value === "number") cell.numFmt = '"$"#,##0.00';
+            if (typeof cell.value === "number") cell.numFmt = '"USD "#,##0.00';
           }
 
           // Center date (col 1)
@@ -1377,10 +1464,10 @@ export default function InvoicesPage() {
       totalsRow.getCell(3).font = { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } };
       totalsRow.getCell(3).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.getCell(4).value = totalChinaVal;
-      totalsRow.getCell(4).numFmt = '"$"#,##0.00';
+      totalsRow.getCell(4).numFmt = '"USD "#,##0.00';
       totalsRow.getCell(4).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.getCell(6).value = totalCustomerVal;
-      totalsRow.getCell(6).numFmt = '"$"#,##0.00';
+      totalsRow.getCell(6).numFmt = '"USD "#,##0.00';
       totalsRow.getCell(6).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.height = 26;
 
@@ -1388,7 +1475,6 @@ export default function InvoicesPage() {
       const emptyRow = ws.addRow([""]);
       emptyRow.height = 6;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRow.number, 1, footerRow.number, totalCols);
       const footerCell = ws.getCell(`A${footerRow.number}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -1438,6 +1524,18 @@ export default function InvoicesPage() {
       else if (commFilterStatus.length > 1) params.set("payment_status", commFilterStatus.join(","));
       if (commFilterDateFrom) params.set("date_from", commFilterDateFrom);
       if (commFilterDateTo) params.set("date_to", commFilterDateTo);
+
+      // Year filter for export
+      if (!commFilterDateFrom && !commFilterDateTo) {
+        if (selectedYears.length === 1) {
+          params.set("date_from", `${selectedYears[0]}-01-01`);
+          params.set("date_to", `${selectedYears[0]}-12-31`);
+        } else if (selectedYears.length > 1) {
+          const sorted = [...selectedYears].sort();
+          params.set("date_from", `${sorted[0]}-01-01`);
+          params.set("date_to", `${sorted[sorted.length - 1]}-12-31`);
+        }
+      }
 
       const res = await fetch(`/api/invoices?${params.toString()}`);
       if (!res.ok) throw new Error("Error al obtener las facturas");
@@ -1517,7 +1615,6 @@ export default function InvoicesPage() {
 
       // ROW 1: Unified header
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
@@ -1537,7 +1634,6 @@ export default function InvoicesPage() {
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
       r2.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -1603,7 +1699,7 @@ export default function InvoicesPage() {
           // Money columns right-aligned (col 7, 8, 9)
           if ([7, 8, 9].includes(colNumber)) {
             cell.alignment = { horizontal: "right", vertical: "middle" };
-            if (typeof cell.value === "number") cell.numFmt = '"$"#,##0.00';
+            if (typeof cell.value === "number") cell.numFmt = '"USD "#,##0.00';
           }
 
           // Center dates and currency (col 4, 5, 6)
@@ -1633,13 +1729,13 @@ export default function InvoicesPage() {
       totalsRow.getCell(6).font = { name: "Aptos", size: 10, bold: true, color: { argb: "FFFFFF" } };
       totalsRow.getCell(6).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.getCell(7).value = totalSubtotal;
-      totalsRow.getCell(7).numFmt = '"$"#,##0.00';
+      totalsRow.getCell(7).numFmt = '"USD "#,##0.00';
       totalsRow.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.getCell(8).value = totalTax;
-      totalsRow.getCell(8).numFmt = '"$"#,##0.00';
+      totalsRow.getCell(8).numFmt = '"USD "#,##0.00';
       totalsRow.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.getCell(9).value = totalAmount;
-      totalsRow.getCell(9).numFmt = '"$"#,##0.00';
+      totalsRow.getCell(9).numFmt = '"USD "#,##0.00';
       totalsRow.getCell(9).alignment = { horizontal: "right", vertical: "middle" };
       totalsRow.height = 26;
 
@@ -1647,7 +1743,6 @@ export default function InvoicesPage() {
       const emptyRow = ws.addRow([""]);
       emptyRow.height = 6;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRow.number, 1, footerRow.number, totalCols);
       const footerCell = ws.getCell(`A${footerRow.number}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -1704,6 +1799,11 @@ export default function InvoicesPage() {
   }
 
   return (
+    <div style={{
+      background: T.glassBg, backdropFilter: T.glassBlur,
+      border: `1px solid ${T.glassBorder}`, borderRadius: T.radius,
+      boxShadow: T.shadowGlass, padding: "24px 28px",
+    }}>
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* ─── CSS KEYFRAMES ─── */}
       <style>{`
@@ -1722,15 +1822,18 @@ export default function InvoicesPage() {
       {/* ─── HEADER BANNER ─── */}
       <div style={{
         position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: T.shadowMd,
         animation: "invFadeUp 0.4s ease both",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1742,15 +1845,78 @@ export default function InvoicesPage() {
             <div>
               <h1 style={{
                 fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
-                fontSize: 18, fontWeight: 800, color: "#fff",
-                letterSpacing: "-0.02em", lineHeight: 1.2, margin: 0,
+                fontSize: 22, fontWeight: 700, color: "#fff",
+                letterSpacing: "-0.3px", lineHeight: 1.2, margin: 0,
               }}>Facturas</h1>
-              <p style={{ fontSize: 12, color: "rgba(191,219,254,0.7)", fontWeight: 500, margin: 0 }}>
+              <p style={{ fontSize: 13, color: T.inkMuted, fontWeight: 500, margin: 0, opacity: 0.85 }}>
                 Gestión de facturas comerciales y de proveedores chinos
               </p>
             </div>
           </div>
-          <div style={{ display: activeTab === "conversor" ? "none" : "flex", gap: 8 }}>
+          <div style={{ display: activeTab === "conversor" ? "none" : "flex", gap: 8, alignItems: "center" }}>
+            {/* Year multiselect dropdown */}
+            <div ref={yearDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setYearDropdownOpen(!yearDropdownOpen)}
+                style={{
+                  padding: "6px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)",
+                  color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", outline: "none", display: "flex", alignItems: "center", gap: 6,
+                  minWidth: 80,
+                }}
+              >
+                {yearLabel}
+                <ChevronDown size={14} style={{ opacity: 0.7 }} />
+              </button>
+              {yearDropdownOpen && typeof document !== "undefined" && createPortal(
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 99998 }} onMouseDown={() => setYearDropdownOpen(false)} />
+                  <div onMouseDown={(e) => e.stopPropagation()} style={{
+                    position: "fixed",
+                    top: (yearDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                    left: (yearDropdownRef.current?.getBoundingClientRect().left ?? 0),
+                    zIndex: 99999,
+                    background: "#fff", borderRadius: 10, border: "1px solid #E2E0DC",
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
+                  }}>
+                    {[
+                      { value: "all", label: "Todos" },
+                      { value: "2026", label: "2026" },
+                      { value: "2025", label: "2025" },
+                      { value: "2024", label: "2024" },
+                    ].map((opt) => {
+                      const isAll = opt.value === "all";
+                      const isChecked = isAll ? selectedYears.length === 0 : selectedYears.includes(opt.value);
+                      return (
+                        <div
+                          key={opt.value}
+                          onClick={(e) => { e.stopPropagation(); toggleYear(opt.value); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                            borderRadius: 6, cursor: "pointer",
+                            background: isChecked ? "#E8F0FE" : "transparent",
+                          }}
+                          onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = "#FCFBF9"; }}
+                          onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isChecked ? "#0B5394" : "#fff",
+                            border: `1.5px solid ${isChecked ? "#0B5394" : "#E2E0DC"}`,
+                          }}>
+                            {isChecked && <Check size={12} style={{ color: "#fff" }} />}
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: isChecked ? 600 : 400, color: isChecked ? "#0B5394" : "#18191D" }}>{opt.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
+            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.2)" }} />
             <button
               onClick={activeTab === "comerciales" ? handleCommDownloadExcel : handleChinaDownloadExcel}
               disabled={activeTab === "comerciales" ? commDownloading : chinaDownloading}
@@ -1777,14 +1943,14 @@ export default function InvoicesPage() {
               onClick={activeTab === "comerciales" ? openCreateForm : openCreateChinaForm}
               style={{
                 padding: "7px 16px", borderRadius: 8, border: "none",
-                background: "#fff", color: "#1E3A5F", fontWeight: 700, fontSize: 12,
+                background: T.gradientPrimary, color: "#fff", fontWeight: 700, fontSize: 12,
                 cursor: "pointer", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
                 display: "flex", alignItems: "center", gap: 5,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                boxShadow: T.shadowMd,
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)"; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"; }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = T.shadowLg; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowMd; }}
             >
               <span style={{ display: "flex" }}>{Ic.plus}</span> Nueva Factura
             </button>
@@ -2040,7 +2206,7 @@ export default function InvoicesPage() {
                               background: idx % 2 === 1 ? T.surfaceAlt : T.surface,
                               borderBottom: `1px solid ${T.borderLight}`,
                             }}
-                            onMouseEnter={e => e.currentTarget.style.background = T.accentLight}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(11,83,148,0.03)"}
                             onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 1 ? T.surfaceAlt : T.surface}
                           >
                             <td style={{ padding: "10px 14px", fontWeight: 700, color: T.accent, fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>
@@ -2404,7 +2570,7 @@ export default function InvoicesPage() {
                             background: idx % 2 === 1 ? T.surfaceAlt : T.surface,
                             borderBottom: `1px solid ${T.borderLight}`,
                           }}
-                          onMouseEnter={e => e.currentTarget.style.background = T.accentLight}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(11,83,148,0.03)"}
                           onMouseLeave={e => e.currentTarget.style.background = idx % 2 === 1 ? T.surfaceAlt : T.surface}
                         >
                           <td style={{ padding: "10px 14px", color: T.inkMuted, fontSize: 12 }}>{formatDate(invoice.invoice_date)}</td>
@@ -2415,7 +2581,7 @@ export default function InvoicesPage() {
                           <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 600, color: T.ink, fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>
                             {formatCurrency(invoice.china_invoice_value)}
                           </td>
-                          <td style={{ padding: "10px 14px", color: T.inkSoft, fontSize: 12 }}>{invoice.customer_contract || "\u2014"}</td>
+                          <td style={{ padding: "10px 14px", fontWeight: 700, color: T.accent, fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>{invoice.customer_contract || "\u2014"}</td>
                           <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 600, color: T.ink, fontFamily: "'JetBrains Mono',monospace", fontSize: 12 }}>
                             {formatCurrency(invoice.customer_invoice_value)}
                           </td>
@@ -2547,7 +2713,7 @@ export default function InvoicesPage() {
               <div style={{
                 width: 40, height: 40, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center",
                 background: editingInvoice ? `linear-gradient(135deg, ${T.warning}, ${T.orange})` : `linear-gradient(135deg, ${T.accent}, ${T.blue})`,
-                color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                color: "#fff", boxShadow: "0 4px 12px rgba(11,83,148,0.10)",
               }}>
                 {editingInvoice ? <Pencil style={{ width: 18, height: 18 }} /> : <Plus style={{ width: 18, height: 18 }} />}
               </div>
@@ -3185,9 +3351,9 @@ export default function InvoicesPage() {
                   disabled={saving}
                   style={{
                     display: "flex", alignItems: "center", gap: 8, padding: "10px 24px",
-                    borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${T.accent}, ${T.blue})`,
+                    borderRadius: 12, border: "none", background: T.gradientPrimary,
                     color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
-                    fontFamily: "'DM Sans',sans-serif", boxShadow: "0 4px 12px rgba(11,83,148,0.2)",
+                    fontFamily: "'DM Sans',sans-serif", boxShadow: T.shadowMd,
                   }}
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -3578,7 +3744,7 @@ export default function InvoicesPage() {
             className="absolute inset-0 bg-slate-900/50 backdrop-blur-md transition-opacity duration-300"
             onClick={() => { chinaResetForm(); setChinaSheetOpen(false); }}
           />
-          <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-3xl border border-white/30 bg-white/85 backdrop-blur-2xl shadow-[0_32px_64px_-12px_rgba(0,0,0,0.25)] animate-in fade-in zoom-in-95 duration-300">
+          <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-3xl border border-white/30 bg-white/85 backdrop-blur-2xl shadow-[0_32px_64px_-12px_rgba(11,83,148,0.18)] animate-in fade-in zoom-in-95 duration-300">
             {/* Gradient accent bar */}
             <div className="absolute top-0 left-0 right-0 h-1 rounded-t-3xl bg-gradient-to-r from-[#1E3A5F] via-blue-500 to-cyan-400" />
 
@@ -3630,12 +3796,92 @@ export default function InvoicesPage() {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-slate-600">Cliente <span className="text-red-500">*</span></Label>
-                    <Input
-                      placeholder="Nombre del cliente"
-                      value={chinaFormData.customer_name}
-                      onChange={(e) => handleChinaFieldChange("customer_name", e.target.value)}
-                      className="rounded-lg"
-                    />
+                    <Popover onOpenChange={(open) => { if (open) { setChinaClientSearch(""); setChinaClientAdding(false); } }}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-9 text-sm rounded-lg">
+                          {chinaFormData.customer_name || <span className="text-muted-foreground">Buscar cliente...</span>}
+                          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[320px] p-0" align="start">
+                        <div className="flex flex-col">
+                          <div className="p-2 border-b border-slate-100">
+                            <div className="relative">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                              <Input
+                                placeholder="Buscar cliente..."
+                                value={chinaClientSearch}
+                                onChange={(e) => setChinaClientSearch(e.target.value)}
+                                className="pl-8 h-8 text-sm"
+                                autoFocus
+                              />
+                            </div>
+                          </div>
+                          <div className="max-h-[200px] overflow-y-auto p-1">
+                            {chinaAllClients.filter((c) => c.toLowerCase().includes(chinaClientSearch.toLowerCase())).length === 0 && !chinaClientAdding && (
+                              <div className="px-3 py-4 text-center text-xs text-slate-400">No se encontraron clientes</div>
+                            )}
+                            {chinaAllClients.filter((c) => c.toLowerCase().includes(chinaClientSearch.toLowerCase())).map((c) => (
+                              <button
+                                key={c}
+                                onClick={() => { handleChinaFieldChange("customer_name", c); setChinaClientSearch(""); }}
+                                className={cn(
+                                  "w-full text-left px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-2",
+                                  chinaFormData.customer_name === c ? "bg-[#1E3A5F]/10 text-[#1E3A5F] font-medium" : "hover:bg-slate-50 text-slate-700"
+                                )}
+                              >
+                                <Building2 className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                                {c}
+                                {chinaFormData.customer_name === c && <CheckCircle2 className="w-3.5 h-3.5 ml-auto text-[#1E3A5F]" />}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="border-t border-slate-100 p-2">
+                            {!chinaClientAdding ? (
+                              <button
+                                onClick={() => setChinaClientAdding(true)}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                Agregar nuevo cliente
+                              </button>
+                            ) : (
+                              <div className="flex gap-1.5">
+                                <Input
+                                  placeholder="Nombre del nuevo cliente"
+                                  value={chinaClientSearch}
+                                  onChange={(e) => setChinaClientSearch(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && chinaClientSearch.trim()) {
+                                      chinaAddCustomClient(chinaClientSearch);
+                                      handleChinaFieldChange("customer_name", chinaClientSearch.trim().toUpperCase());
+                                      setChinaClientSearch("");
+                                      setChinaClientAdding(false);
+                                    }
+                                  }}
+                                  className="h-8 text-xs flex-1"
+                                  autoFocus
+                                />
+                                <Button
+                                  size="sm"
+                                  className="h-8 text-xs bg-[#1E3A5F] hover:bg-[#2A4D7A]"
+                                  onClick={() => {
+                                    if (chinaClientSearch.trim()) {
+                                      chinaAddCustomClient(chinaClientSearch);
+                                      handleChinaFieldChange("customer_name", chinaClientSearch.trim().toUpperCase());
+                                      setChinaClientSearch("");
+                                      setChinaClientAdding(false);
+                                    }
+                                  }}
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
 
@@ -3744,7 +3990,8 @@ export default function InvoicesPage() {
                   <Button
                     type="submit"
                     disabled={chinaSaving}
-                    className="rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-md shadow-blue-500/20"
+                    className="rounded-xl text-white"
+                    style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                   >
                     {chinaSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     {chinaEditingInvoice ? "Guardar Cambios" : "Crear Factura"}
@@ -3782,6 +4029,7 @@ export default function InvoicesPage() {
           ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
 
@@ -25,6 +25,16 @@ export async function GET(_request: NextRequest) {
     }
 
     // =======================================================
+    // YEAR FILTER — only show current year data (or all)
+    // =======================================================
+    const { searchParams } = new URL(request.url);
+    const yearParam = searchParams.get("year") || String(new Date().getFullYear());
+    const isAllYears = yearParam === "all";
+    const year = isAllYears ? new Date().getFullYear() : parseInt(yearParam, 10);
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+
+    // =======================================================
     // ALL QUERIES IN PARALLEL - consolidated for performance
     // =======================================================
 
@@ -41,44 +51,56 @@ export async function GET(_request: NextRequest) {
       remindersQuery.eq("assigned_to", user.id);
     }
 
+    // Build queries — conditionally apply year filters
+    let contractsQ = supabase
+      .from("contracts")
+      .select("status, tons_agreed, tons_shipped, commercial_name, country")
+      .eq("is_active", true);
+    if (!isAllYears) {
+      contractsQ = contractsQ.gte("contract_date", yearStart).lte("contract_date", yearEnd);
+    }
+
+    let invoicesQ = supabase
+      .from("contract_invoices")
+      .select("china_invoice_value, customer_invoice_value, approved, invoice_date")
+      .eq("is_active", true);
+    if (!isAllYears) {
+      invoicesQ = invoicesQ.gte("invoice_date", yearStart).lte("invoice_date", yearEnd);
+    }
+
+    let etasQ = supabase
+      .from("contracts")
+      .select("id, client_name, client_contract, commercial_name, vessel_name, eta_final, bl_number, country, status")
+      .eq("is_active", true)
+      .eq("status", "EN TRÁNSITO");
+    if (!isAllYears) {
+      etasQ = etasQ.gte("contract_date", yearStart).lte("contract_date", yearEnd);
+    }
+
+    let pendingInvQ = supabase
+      .from("contract_invoices")
+      .select("id, invoice_date, customer_name, customer_contract, china_invoice_number, china_invoice_value, customer_invoice_value, approved")
+      .eq("is_active", true)
+      .eq("approved", false);
+    if (!isAllYears) {
+      pendingInvQ = pendingInvQ.gte("invoice_date", yearStart).lte("invoice_date", yearEnd);
+    }
+
     const [
-      // 1. Single query for ALL active contracts with status, tons, commercial, country
       contractsResult,
-      // 2. Contract invoices summary
       chinaInvoicesResult,
-      // 3. Upcoming ETAs
       upcomingEtasResult,
-      // 4. Pending China invoices
       pendingChinaInvoicesResult,
-      // 5. Pending Reminders
       remindersResult,
-      // 6. Recent Activity
       recentActivityResult,
     ] = await Promise.all([
-      // ONE query instead of 5 separate count queries + 2 data queries
-      supabase
-        .from("contracts")
-        .select("status, tons_agreed, tons_shipped, commercial_name, country")
-        .eq("is_active", true)
-        .limit(5000),
-      supabase
-        .from("contract_invoices")
-        .select("china_invoice_value, customer_invoice_value, approved")
-        .eq("is_active", true)
-        .limit(5000),
-      supabase
-        .from("contracts")
-        .select("id, client_name, client_contract, commercial_name, vessel_name, eta_final, bl_number, country, status")
-        .eq("is_active", true)
-        .eq("status", "EN TRÁNSITO")
+      contractsQ.limit(5000),
+      invoicesQ.limit(5000),
+      etasQ
         .not("eta_final", "is", null)
         .order("eta_final", { ascending: true })
         .limit(8),
-      supabase
-        .from("contract_invoices")
-        .select("id, invoice_date, customer_name, customer_contract, china_invoice_number, china_invoice_value, customer_invoice_value, approved")
-        .eq("is_active", true)
-        .eq("approved", false)
+      pendingInvQ
         .gt("customer_invoice_value", 0)
         .order("invoice_date", { ascending: false })
         .limit(10),

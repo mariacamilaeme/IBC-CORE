@@ -335,9 +335,11 @@ function TemplateCard({
       <div
         className="relative p-5 rounded-2xl border overflow-hidden"
         style={{
-          background: T.surface,
-          borderColor: T.borderLight,
-          boxShadow: T.shadow,
+          background: T.glassBg,
+          backdropFilter: T.glassBlur,
+          WebkitBackdropFilter: T.glassBlur,
+          borderColor: T.glassBorder,
+          boxShadow: T.shadowGlass,
         }}
       >
         {/* Category badge + actions */}
@@ -544,8 +546,11 @@ function ArticleRow({
       <div
         className="flex items-center gap-4 px-5 py-4 rounded-xl border transition-all duration-200 hover:shadow-md"
         style={{
-          background: T.surface,
-          borderColor: T.borderLight,
+          background: T.glassBg,
+          backdropFilter: T.glassBlur,
+          WebkitBackdropFilter: T.glassBlur,
+          borderColor: T.glassBorder,
+          boxShadow: T.shadowGlass,
         }}
       >
         {/* Status indicator */}
@@ -655,8 +660,11 @@ function PasswordRow({
       <div
         className="flex items-center gap-4 px-5 py-4 rounded-xl border transition-all duration-200 hover:shadow-md"
         style={{
-          background: T.surface,
-          borderColor: T.borderLight,
+          background: T.glassBg,
+          backdropFilter: T.glassBlur,
+          WebkitBackdropFilter: T.glassBlur,
+          borderColor: T.glassBorder,
+          boxShadow: T.shadowGlass,
         }}
       >
         {/* Icon */}
@@ -816,7 +824,7 @@ function TemplateViewModal({
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-2xl rounded-2xl overflow-hidden"
-        style={{ background: T.surface, boxShadow: T.shadowLg }}
+        style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, boxShadow: T.shadowGlass }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -939,7 +947,7 @@ function TemplateEditorModal({
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-3xl max-h-[90vh] rounded-2xl overflow-hidden flex flex-col"
-        style={{ background: T.surface, boxShadow: T.shadowLg }}
+        style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, boxShadow: T.shadowGlass }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -1108,7 +1116,7 @@ function NoteEditorModal({
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-lg rounded-2xl overflow-hidden"
-        style={{ background: T.surface, boxShadow: T.shadowLg }}
+        style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, boxShadow: T.shadowGlass }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -1297,7 +1305,7 @@ function ArticleEditorModal({
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-3xl max-h-[90vh] rounded-2xl overflow-hidden flex flex-col"
-        style={{ background: T.surface, boxShadow: T.shadowLg }}
+        style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, boxShadow: T.shadowGlass }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -1473,7 +1481,7 @@ function PasswordModal({
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-lg rounded-2xl overflow-hidden"
-        style={{ background: T.surface, boxShadow: T.shadowLg }}
+        style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, boxShadow: T.shadowGlass }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -2071,9 +2079,11 @@ export default function WikiPage() {
                   transition={{ delay: 0.2 }}
                   className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl"
                   style={{
-                    background: T.surface,
-                    border: `1px solid ${T.borderLight}`,
-                    boxShadow: T.shadow,
+                    background: T.glassBg,
+                    backdropFilter: T.glassBlur,
+                    WebkitBackdropFilter: T.glassBlur,
+                    border: `1px solid ${T.glassBorder}`,
+                    boxShadow: T.shadowGlass,
                   }}
                 >
                   <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
@@ -2098,7 +2108,7 @@ export default function WikiPage() {
         >
           <div
             className="flex items-center gap-1 p-1.5 rounded-2xl"
-            style={{ background: T.surface, border: `1px solid ${T.borderLight}`, boxShadow: T.shadow }}
+            style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: `1px solid ${T.glassBorder}`, boxShadow: T.shadowGlass }}
           >
             {tabs.map((tab) => (
               <TabButton
@@ -2127,10 +2137,12 @@ export default function WikiPage() {
                 placeholder="Buscar..."
                 className="pl-10 pr-4 py-2.5 rounded-xl border text-[14px] w-[240px] outline-none transition-all focus:ring-2 focus:w-[300px]"
                 style={{
-                  borderColor: T.border,
-                  background: T.surface,
+                  borderColor: T.glassBorder,
+                  background: T.glassBg,
+                  backdropFilter: T.glassBlur,
+                  WebkitBackdropFilter: T.glassBlur,
                   color: T.ink,
-                  boxShadow: T.shadow,
+                  boxShadow: T.shadowGlass,
                 }}
               />
             </div>

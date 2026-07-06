@@ -62,6 +62,7 @@ const MODULE_LABELS: Record<ModuleName, string> = {
   calendar: "Calendario",
   settings: "Configuraci\u00f3n",
   wiki: "Wiki",
+  document_generator: "Generador Doc",
 };
 
 const ALL_MODULES: ModuleName[] = [
@@ -653,7 +654,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#1E3A5F] border-t-transparent" />
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-t-transparent" style={{ borderColor: T.accent, borderTopColor: "transparent" }} />
       </div>
     );
   }
@@ -676,30 +677,41 @@ export default function SettingsPage() {
 
       {/* ── Page title ── */}
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: T.ink }}>Configuraci&oacute;n</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink }}>Configuraci&oacute;n</h1>
         <p className="text-sm mt-1" style={{ color: T.inkMuted }}>
           Administra tu perfil y la configuraci&oacute;n del sistema
         </p>
       </div>
 
+      {/* ── Glass wrapper ── */}
+      <div style={{
+        background: T.glassBg,
+        backdropFilter: T.glassBlur,
+        WebkitBackdropFilter: T.glassBlur,
+        border: "1px solid " + T.glassBorder,
+        borderRadius: T.radius,
+        boxShadow: T.shadowGlass,
+        padding: "24px 28px",
+      }}>
+
       {/* ── Tabs ── */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="bg-white/80 border border-[#E8E6E1] flex-wrap h-auto gap-1 p-1">
-          <TabsTrigger value="profile" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+          <TabsTrigger value="profile" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
             <User className="h-4 w-4" />
             Mi Perfil
           </TabsTrigger>
-          <TabsTrigger value="security" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+          <TabsTrigger value="security" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
             <KeyRound className="h-4 w-4" />
             Seguridad
           </TabsTrigger>
           {isAdminOrDirectora && (
             <>
-              <TabsTrigger value="company" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+              <TabsTrigger value="company" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
                 <Building2 className="h-4 w-4" />
                 Empresa
               </TabsTrigger>
-              <TabsTrigger value="documents" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+              <TabsTrigger value="documents" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
                 <FileText className="h-4 w-4" />
                 Documentos
               </TabsTrigger>
@@ -707,15 +719,15 @@ export default function SettingsPage() {
           )}
           {isAdmin && (
             <>
-              <TabsTrigger value="users" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+              <TabsTrigger value="users" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
                 <Users className="h-4 w-4" />
                 Usuarios
               </TabsTrigger>
-              <TabsTrigger value="roles" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+              <TabsTrigger value="roles" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
                 <Shield className="h-4 w-4" />
                 Roles y Permisos
               </TabsTrigger>
-              <TabsTrigger value="invitations" className="gap-2 data-[state=active]:bg-[#1E3A5F] data-[state=active]:text-white">
+              <TabsTrigger value="invitations" className="gap-2 data-[state=active]:bg-[#0B5394] data-[state=active]:text-white">
                 <Mail className="h-4 w-4" />
                 Invitaciones
               </TabsTrigger>
@@ -727,7 +739,7 @@ export default function SettingsPage() {
             TAB 1: MI PERFIL
         ═══════════════════════════════════════════════════ */}
         <TabsContent value="profile">
-          <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+          <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
             <CardHeader>
               <CardTitle style={{ color: T.ink }}>Informaci&oacute;n Personal</CardTitle>
               <CardDescription>Actualiza tu informaci&oacute;n de perfil</CardDescription>
@@ -847,7 +859,7 @@ export default function SettingsPage() {
 
               <Separator className="bg-[#E8E6E1]" />
 
-              <Button onClick={handleSaveProfile} disabled={saving} className="bg-[#1E3A5F] hover:bg-[#2a4a73]">
+              <Button onClick={handleSaveProfile} disabled={saving} className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}>
                 <Save className="h-4 w-4 mr-2" />
                 {saving ? "Guardando..." : "Guardar Cambios"}
               </Button>
@@ -859,7 +871,7 @@ export default function SettingsPage() {
             TAB 2: SEGURIDAD
         ═══════════════════════════════════════════════════ */}
         <TabsContent value="security">
-          <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+          <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
             <CardHeader>
               <CardTitle style={{ color: T.ink }}>Cambiar Contrase&ntilde;a</CardTitle>
               <CardDescription>Actualiza tu contrase&ntilde;a de acceso</CardDescription>
@@ -943,7 +955,7 @@ export default function SettingsPage() {
               <Button
                 onClick={handleChangePassword}
                 disabled={saving || !allPasswordChecksPassed || newPassword !== confirmPassword}
-                className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
               >
                 <KeyRound className="h-4 w-4 mr-2" />
                 {saving ? "Actualizando..." : "Cambiar Contrase\u00f1a"}
@@ -957,7 +969,7 @@ export default function SettingsPage() {
         ═══════════════════════════════════════════════════ */}
         {isAdminOrDirectora && (
           <TabsContent value="company">
-            <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+            <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
               <CardHeader>
                 <CardTitle style={{ color: T.ink }}>Informaci&oacute;n de la Empresa</CardTitle>
                 <CardDescription>Datos fiscales y de contacto de IBC Steel Group</CardDescription>
@@ -1031,7 +1043,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <Separator className="bg-[#E8E6E1]" />
-                <Button onClick={handleSaveConfig} disabled={saving} className="bg-[#1E3A5F] hover:bg-[#2a4a73]">
+                <Button onClick={handleSaveConfig} disabled={saving} className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}>
                   <Save className="h-4 w-4 mr-2" />
                   {saving ? "Guardando..." : "Guardar Configuraci\u00f3n"}
                 </Button>
@@ -1045,7 +1057,7 @@ export default function SettingsPage() {
         ═══════════════════════════════════════════════════ */}
         {isAdminOrDirectora && (
           <TabsContent value="documents">
-            <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+            <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
               <CardHeader>
                 <CardTitle style={{ color: T.ink }}>Prefijos y Consecutivos</CardTitle>
                 <CardDescription>Configuraci&oacute;n de numeraci&oacute;n autom&aacute;tica de documentos</CardDescription>
@@ -1086,7 +1098,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <Separator className="bg-[#E8E6E1]" />
-                <Button onClick={handleSaveConfig} disabled={saving} className="bg-[#1E3A5F] hover:bg-[#2a4a73]">
+                <Button onClick={handleSaveConfig} disabled={saving} className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}>
                   <Save className="h-4 w-4 mr-2" />
                   {saving ? "Guardando..." : "Guardar Configuraci\u00f3n"}
                 </Button>
@@ -1100,7 +1112,7 @@ export default function SettingsPage() {
         ═══════════════════════════════════════════════════ */}
         {isAdmin && (
           <TabsContent value="users">
-            <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+            <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
               <CardHeader>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>
@@ -1348,7 +1360,7 @@ export default function SettingsPage() {
                   </Button>
                   <Button
                     onClick={handleChangeRole}
-                    className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                    className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                     disabled={!selectedNewRole}
                   >
                     Guardar
@@ -1405,7 +1417,7 @@ export default function SettingsPage() {
                     <CardTitle className="text-base" style={{ color: T.ink }}>Roles</CardTitle>
                     <Button
                       size="sm"
-                      className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                      className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                       onClick={() => {
                         setRoleForm({ name: "", display_name: "", description: "" });
                         setRoleDialog({ open: true, mode: "create" });
@@ -1549,7 +1561,7 @@ export default function SettingsPage() {
                           <Button
                             onClick={handleSavePermissions}
                             disabled={permissionsSaving}
-                            className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                            className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                           >
                             <Save className="h-4 w-4 mr-2" />
                             {permissionsSaving ? "Guardando..." : "Guardar Permisos"}
@@ -1624,7 +1636,7 @@ export default function SettingsPage() {
                   </Button>
                   <Button
                     onClick={roleDialog.mode === "create" ? handleCreateRole : handleEditRole}
-                    className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                    className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                     disabled={saving}
                   >
                     {saving ? "Guardando..." : roleDialog.mode === "create" ? "Crear Rol" : "Guardar"}
@@ -1670,7 +1682,7 @@ export default function SettingsPage() {
           <TabsContent value="invitations">
             <div className="space-y-6">
               {/* Send invitation form */}
-              <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+              <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
                 <CardHeader>
                   <CardTitle style={{ color: T.ink }}>Enviar Invitaci&oacute;n</CardTitle>
                   <CardDescription>Invita a nuevos usuarios a unirse al sistema</CardDescription>
@@ -1710,7 +1722,7 @@ export default function SettingsPage() {
                     <Button
                       onClick={handleSendInvitation}
                       disabled={inviteSending || !inviteForm.email || !inviteForm.role_id}
-                      className="bg-[#1E3A5F] hover:bg-[#2a4a73]"
+                      className="text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
                     >
                       <Send className="h-4 w-4 mr-2" />
                       {inviteSending ? "Enviando..." : "Enviar"}
@@ -1720,7 +1732,7 @@ export default function SettingsPage() {
               </Card>
 
               {/* Invitations table */}
-              <Card className="rounded-xl border-[#E8E6E1]" style={{ boxShadow: T.shadow }}>
+              <Card className="rounded-xl" style={{ background: T.glassBg, backdropFilter: T.glassBlur, WebkitBackdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div>
@@ -1841,6 +1853,7 @@ export default function SettingsPage() {
           </TabsContent>
         )}
       </Tabs>
+      </div>{/* end glass wrapper */}
     </div>
   );
 }

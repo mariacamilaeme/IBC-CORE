@@ -75,6 +75,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Date range filtering
+    const dateFrom = searchParams.get("date_from") || "";
+    const dateTo = searchParams.get("date_to") || "";
+    if (dateFrom) {
+      query = query.gte("created_at", dateFrom);
+    }
+    if (dateTo) {
+      query = query.lte("created_at", dateTo + "T23:59:59");
+    }
+
     if (search) {
       const s = sanitizePostgrestValue(search);
       query = query.or(

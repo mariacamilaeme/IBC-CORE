@@ -27,10 +27,19 @@ export function formatRelativeDate(date: string | Date | null | undefined): stri
 
 export function formatCurrency(amount: number | null | undefined, currency: string = "USD"): string {
   if (amount == null) return "—";
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency,
+  const formatted = new Intl.NumberFormat("es-CO", {
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+  return `${currency} ${formatted}`;
+}
+
+/** Format a number with es-CO locale (period thousands, comma decimals) without currency symbol */
+export function fmtAmount(amount: number | null | undefined, decimals: number = 2): string {
+  if (amount == null) return "—";
+  return new Intl.NumberFormat("es-CO", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(amount);
 }
 

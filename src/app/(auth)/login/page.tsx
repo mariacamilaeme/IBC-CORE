@@ -9,51 +9,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Eye, EyeOff, Lock, Mail, ArrowRight, Shield } from "lucide-react";
 import { toast } from "sonner";
 
-// Animated gradient background
-function AnimatedGradient() {
-  return (
-    <div className="absolute inset-0 overflow-hidden">
-      <motion.div
-        className="absolute inset-0"
-        animate={{
-          background: [
-            "linear-gradient(135deg, #0f172a 0%, #1e3a5f 30%, #1a365d 60%, #0c1e36 100%)",
-            "linear-gradient(135deg, #0c1e36 0%, #1a365d 30%, #1e3a5f 60%, #0f172a 100%)",
-            "linear-gradient(135deg, #152238 0%, #1e3a5f 40%, #0f2744 70%, #0c1e36 100%)",
-            "linear-gradient(135deg, #0f172a 0%, #1e3a5f 30%, #1a365d 60%, #0c1e36 100%)",
-          ],
-        }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute w-[500px] h-[500px] rounded-full opacity-25"
-        style={{
-          background: "radial-gradient(circle, rgba(59,130,246,0.35) 0%, transparent 70%)",
-          top: "-15%",
-          right: "-20%",
-        }}
-        animate={{
-          scale: [1, 1.2, 1],
-          opacity: [0.25, 0.35, 0.25],
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute w-[400px] h-[400px] rounded-full opacity-15"
-        style={{
-          background: "radial-gradient(circle, rgba(99,205,255,0.3) 0%, transparent 70%)",
-          bottom: "-10%",
-          left: "-15%",
-        }}
-        animate={{
-          scale: [1, 1.15, 1],
-          opacity: [0.15, 0.25, 0.15],
-        }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 3 }}
-      />
-    </div>
-  );
-}
+const HARBOR = "#0B5394";
+const BEACON = "#00B8E0";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -96,6 +53,13 @@ export default function LoginPage() {
       if (error) {
         const newAttempts = loginAttempts + 1;
         setLoginAttempts(newAttempts);
+        // Traducir la razón real de Supabase (no siempre es credencial inválida)
+        const reason =
+          error.message === "Invalid login credentials" ? "Correo o contrasena incorrectos."
+          : error.message === "Email not confirmed" ? "El correo aún no está confirmado."
+          : error.message.toLowerCase().includes("rate limit") ? "Demasiadas solicitudes al servidor. Espera un minuto."
+          : error.message.toLowerCase().includes("fetch") ? "Sin conexión con el servidor. Revisa tu internet."
+          : error.message;
         if (newAttempts >= 5) {
           setLockedUntil(Date.now() + 60000); // Lock for 60 seconds
           toast.error("Demasiados intentos fallidos", {
@@ -103,7 +67,7 @@ export default function LoginPage() {
           });
         } else {
           toast.error("Error de autenticacion", {
-            description: `Correo o contrasena incorrectos. Intentos restantes: ${5 - newAttempts}`,
+            description: `${reason} Intentos restantes: ${5 - newAttempts}`,
           });
         }
         return;
@@ -138,331 +102,300 @@ export default function LoginPage() {
   if (!mounted) return null;
 
   return (
-    <div className="h-screen flex overflow-hidden">
-      {/* Left Panel - Branding */}
+    <div className="h-screen relative overflow-hidden">
+      {/* ═══ Fondo: puerto a pantalla completa + duotono navy ═══ */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 1 }}
-        className="hidden lg:flex lg:w-[36%] relative overflow-hidden bg-[#0f172a]"
-      >
-        <AnimatedGradient />
+        initial={{ scale: 1.06, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute inset-0"
+        style={{
+          backgroundImage: "url(/login-port.jpg)",
+          backgroundSize: "cover",
+          backgroundPosition: "center 38%",
+        }}
+      />
+      {/* Overlay de marca: navy profundo que se abre hacia la derecha */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(100deg, rgba(4,15,27,0.94) 0%, rgba(5,20,36,0.82) 34%, rgba(6,27,46,0.60) 62%, rgba(6,27,46,0.72) 100%)",
+        }}
+      />
+      {/* Vignette inferior para asentar el texto */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: "linear-gradient(180deg, rgba(4,15,27,0.35) 0%, transparent 30%, transparent 62%, rgba(4,15,27,0.65) 100%)",
+        }}
+      />
 
-        {/* Grid pattern overlay */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
-            backgroundSize: "60px 60px",
-          }}
-        />
-
-        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
-          {/* Top - Logo */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
-            className="flex items-center gap-3"
+      {/* ═══ Contenido ═══ */}
+      <div className="relative z-10 h-full flex flex-col">
+        {/* Marca, arriba a la izquierda */}
+        <motion.div
+          initial={{ opacity: 0, y: -14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.2 }}
+          className="flex items-center gap-3 px-10 pt-8"
+        >
+          <div
+            className="w-11 h-11 rounded-lg flex items-center justify-center"
+            style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", backdropFilter: "blur(8px)" }}
           >
-            <div className="w-11 h-11 rounded-xl bg-white/10 backdrop-blur-sm border border-white/15 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">IBC</span>
-            </div>
-            <div>
-              <span className="text-white font-semibold text-lg tracking-tight">
-                Steel Group
-              </span>
-              <div className="flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs text-white/50">Sistema activo</span>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Center - Clean branding */}
-          <div className="flex-1 flex flex-col justify-center max-w-lg">
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            <span
+              className="text-white font-bold text-[15px]"
+              style={{ fontFamily: "var(--font-space-grotesk), 'Space Grotesk', sans-serif" }}
             >
-              <motion.h1
-                className="text-4xl xl:text-5xl font-bold leading-tight mb-3 cursor-default select-none"
-                style={{
-                  background: "linear-gradient(135deg, #ffffff 0%, #94b8db 50%, #ffffff 100%)",
-                  backgroundSize: "200% auto",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                }}
-                whileHover={{
-                  backgroundPosition: ["0% center", "200% center"],
-                  textShadow: "0 0 40px rgba(96,165,250,0.6)",
-                  scale: 1.03,
-                }}
-                transition={{ duration: 0.8, ease: "easeInOut" }}
-              >
-                I B C&nbsp;&nbsp;&nbsp;C O R E
-              </motion.h1>
-
-              {/* Decorative line */}
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: 80 }}
-                transition={{ duration: 0.8, delay: 0.7, ease: [0.22, 1, 0.36, 1] }}
-                className="h-[3px] rounded-full mb-5"
-                style={{
-                  background: "linear-gradient(90deg, rgba(96,165,250,0.8), rgba(96,165,250,0.1))",
-                }}
-              />
-
-              <p className="text-base text-white/45 leading-relaxed max-w-md">
-                Centro de operaciones para gestion logistica, cotizaciones, embarques
-                y facturacion del grupo siderurgico.
-              </p>
-            </motion.div>
+              IBC
+            </span>
           </div>
-
-          {/* Bottom - Copyright */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 1 }}
-          >
-            <p className="text-xs text-white/25">
-              &copy; {new Date().getFullYear()} IBC Steel Group. Todos los derechos reservados.
-            </p>
-          </motion.div>
-        </div>
-      </motion.div>
-
-      {/* Right Panel - Login Form */}
-      <div className="flex-1 flex items-center justify-center relative bg-slate-50">
-        {/* Subtle background */}
-        <div className="absolute inset-0">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl opacity-60 -translate-y-1/2 translate-x-1/3" />
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-50 rounded-full blur-3xl opacity-50 translate-y-1/3 -translate-x-1/4" />
-        </div>
-
-        {/* Dot pattern */}
-        <div
-          className="absolute inset-0 opacity-[0.4]"
-          style={{
-            backgroundImage: "radial-gradient(#cbd5e1 0.5px, transparent 0.5px)",
-            backgroundSize: "24px 24px",
-          }}
-        />
-
-        <div className="relative z-10 w-full max-w-[420px] px-8">
-          {/* Mobile logo */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5 }}
-            className="lg:hidden text-center mb-10"
-          >
-            <div className="inline-flex items-center gap-2.5 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-[#1E3A5F] flex items-center justify-center">
-                <span className="text-white font-bold text-sm">IBC</span>
-              </div>
-              <span className="text-xl font-bold text-[#1E3A5F]">Steel Group</span>
+          <div>
+            <div
+              className="text-white font-semibold text-[15px]"
+              style={{ fontFamily: "var(--font-space-grotesk), 'Space Grotesk', sans-serif", letterSpacing: "0.14em" }}
+            >
+              STEEL GROUP
             </div>
-          </motion.div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: BEACON }} />
+              <span
+                className="text-[10px] uppercase"
+                style={{ fontFamily: "var(--font-jetbrains-mono), monospace", letterSpacing: "0.2em", color: "rgba(255,255,255,0.55)" }}
+              >
+                IBC Core
+              </span>
+            </div>
+          </div>
+        </motion.div>
 
-          {/* Welcome text */}
+        {/* Cuerpo: titular izquierda + tarjeta derecha */}
+        <div className="flex-1 flex items-center justify-between gap-10 px-10 lg:px-16">
+          {/* Titular sobrio, abajo-izquierda en pantallas grandes */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 22 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="mb-8"
+            transition={{ duration: 0.8, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            className="hidden lg:block max-w-xl self-end pb-20"
           >
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">
-              Bienvenido de vuelta
-            </h2>
-            <p className="text-sm text-slate-500">
-              Ingresa tus credenciales para acceder al sistema
+            <h1
+              style={{
+                fontFamily: "var(--font-space-grotesk), 'Space Grotesk', sans-serif",
+                fontWeight: 600,
+                fontSize: "clamp(42px, 4.6vw, 68px)",
+                letterSpacing: "0.14em",
+                lineHeight: 1.05,
+                background: "linear-gradient(120deg, #FFFFFF 0%, #DCEBF7 45%, #9CC6E8 100%)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                filter: "drop-shadow(0 2px 18px rgba(4,15,27,0.55))",
+              }}
+            >
+              IBC CORE
+            </h1>
+            <div
+              className="mt-4 mb-3"
+              style={{ width: 64, height: 2.5, borderRadius: 99, background: `linear-gradient(90deg, ${BEACON}, rgba(0,184,224,0.12))` }}
+            />
+            <p
+              className="text-[16px] leading-relaxed max-w-md"
+              style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 1px 12px rgba(4,15,27,0.6)" }}
+            >
+              Centro de operaciones logísticas de IBC Steel Group.
             </p>
           </motion.div>
 
-          {/* Login form */}
-          <form onSubmit={handleLogin} className="space-y-5">
-            {/* Email field */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-            >
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-slate-700 mb-2"
+          {/* ═══ Tarjeta flotante de acceso ═══ */}
+          <motion.div
+            initial={{ opacity: 0, y: 26, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            className="w-full max-w-[420px] mx-auto lg:mx-0 lg:mr-[4vw] rounded-3xl p-8 sm:p-9"
+            style={{
+              background: "rgba(255,255,255,0.94)",
+              backdropFilter: "blur(24px)",
+              border: "1px solid rgba(255,255,255,0.6)",
+              boxShadow: "0 40px 90px -20px rgba(2,10,20,0.55), 0 12px 32px -12px rgba(2,10,20,0.35)",
+            }}
+          >
+            {/* Encabezado */}
+            <div className="mb-7">
+              <p
+                className="text-[10px] uppercase mb-2.5 flex items-center gap-2.5"
+                style={{ fontFamily: "var(--font-jetbrains-mono), monospace", letterSpacing: "0.26em", color: HARBOR, fontWeight: 600 }}
               >
-                Correo electronico
-              </label>
-              <div
-                className={`relative rounded-xl transition-all duration-300 ${
-                  focusedField === "email"
-                    ? "ring-2 ring-[#1E3A5F]/20 shadow-lg shadow-[#1E3A5F]/5"
-                    : "shadow-sm"
-                }`}
-              >
-                <div
-                  className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-300 ${
-                    focusedField === "email" ? "text-[#1E3A5F]" : "text-slate-400"
-                  }`}
-                >
-                  <Mail className="w-[18px] h-[18px]" />
-                </div>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="correo@ibcsteelgroup.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onFocus={() => setFocusedField("email")}
-                  onBlur={() => setFocusedField(null)}
-                  required
-                  className="pl-11 h-12 bg-white border-slate-200/80 rounded-xl text-sm placeholder:text-slate-400 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-[#1E3A5F]/30"
-                />
-              </div>
-            </motion.div>
-
-            {/* Password field */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
-            >
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-slate-700 mb-2"
-              >
-                Contrasena
-              </label>
-              <div
-                className={`relative rounded-xl transition-all duration-300 ${
-                  focusedField === "password"
-                    ? "ring-2 ring-[#1E3A5F]/20 shadow-lg shadow-[#1E3A5F]/5"
-                    : "shadow-sm"
-                }`}
-              >
-                <div
-                  className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-300 ${
-                    focusedField === "password"
-                      ? "text-[#1E3A5F]"
-                      : "text-slate-400"
-                  }`}
-                >
-                  <Lock className="w-[18px] h-[18px]" />
-                </div>
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Ingresa tu contrasena"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onFocus={() => setFocusedField("password")}
-                  onBlur={() => setFocusedField(null)}
-                  required
-                  className="pl-11 pr-11 h-12 bg-white border-slate-200/80 rounded-xl text-sm placeholder:text-slate-400 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-[#1E3A5F]/30"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors duration-200"
-                  tabIndex={-1}
-                >
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={showPassword ? "hide" : "show"}
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.8 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-[18px] h-[18px]" />
-                      ) : (
-                        <Eye className="w-[18px] h-[18px]" />
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </button>
-              </div>
-            </motion.div>
-
-            {/* Submit button */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="pt-2"
-            >
-              <Button
-                type="submit"
-                disabled={loading}
-                className="w-full h-12 rounded-xl text-sm font-semibold tracking-wide transition-all duration-300 relative overflow-hidden group"
+                <span style={{ display: "inline-block", width: 22, height: 1.5, background: BEACON }} />
+                IBC CORE
+              </p>
+              <h2
+                className="text-[26px] mb-1.5"
                 style={{
-                  background: loading
-                    ? "#94a3b8"
-                    : "linear-gradient(135deg, #1E3A5F 0%, #2a5298 100%)",
-                  boxShadow: loading
-                    ? "none"
-                    : "0 4px 15px -3px rgba(30,58,95,0.4), 0 0 0 1px rgba(30,58,95,0.1)",
+                  fontFamily: "var(--font-space-grotesk), 'Space Grotesk', sans-serif",
+                  fontWeight: 600,
+                  letterSpacing: "-0.02em",
+                  color: "#061B2E",
                 }}
               >
-                <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700" />
-                {loading ? (
-                  <div className="flex items-center gap-2.5">
-                    <motion.div
-                      className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
-                      animate={{ rotate: 360 }}
-                      transition={{
-                        duration: 0.8,
-                        repeat: Infinity,
-                        ease: "linear",
-                      }}
-                    />
-                    <span>Verificando credenciales...</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span>Iniciar sesion</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform duration-200" />
-                  </div>
-                )}
-              </Button>
-            </motion.div>
-          </form>
+                Inicia sesión
+              </h2>
+              <p className="text-sm" style={{ color: "#51647A" }}>
+                Accede con tu cuenta corporativa.
+              </p>
+            </div>
 
-          {/* Security note */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.7 }}
-            className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Conexion protegida con cifrado de extremo a extremo</span>
-          </motion.div>
+            {/* Formulario */}
+            <form onSubmit={handleLogin} className="space-y-5">
+              {/* Email */}
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium mb-2" style={{ color: "#243A50" }}>
+                  Correo electronico
+                </label>
+                <div
+                  className={`relative rounded-xl transition-all duration-300 ${
+                    focusedField === "email" ? "ring-2 shadow-lg" : "shadow-sm"
+                  }`}
+                  style={focusedField === "email" ? { boxShadow: "0 8px 24px rgba(11,83,148,0.12)", ["--tw-ring-color" as string]: "rgba(11,83,148,0.20)" } : undefined}
+                >
+                  <div
+                    className="absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-300"
+                    style={{ color: focusedField === "email" ? HARBOR : "#8496AB" }}
+                  >
+                    <Mail className="w-[18px] h-[18px]" />
+                  </div>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="correo@ibcsteelgroup.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onFocus={() => setFocusedField("email")}
+                    onBlur={() => setFocusedField(null)}
+                    required
+                    className="pl-11 h-12 bg-white rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                    style={{ borderColor: "#D9E3EF" }}
+                  />
+                </div>
+              </div>
 
-          {/* Credits */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.9 }}
-            className="mt-8 text-center"
-          >
-            <div className="inline-flex flex-col items-center gap-1 px-5 py-2.5 rounded-xl bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200/80 shadow-sm">
-              <span className="text-[9px] text-slate-400 uppercase tracking-[0.2em] font-medium">
+              {/* Password */}
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium mb-2" style={{ color: "#243A50" }}>
+                  Contrasena
+                </label>
+                <div
+                  className={`relative rounded-xl transition-all duration-300 ${
+                    focusedField === "password" ? "ring-2 shadow-lg" : "shadow-sm"
+                  }`}
+                  style={focusedField === "password" ? { boxShadow: "0 8px 24px rgba(11,83,148,0.12)", ["--tw-ring-color" as string]: "rgba(11,83,148,0.20)" } : undefined}
+                >
+                  <div
+                    className="absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-300"
+                    style={{ color: focusedField === "password" ? HARBOR : "#8496AB" }}
+                  >
+                    <Lock className="w-[18px] h-[18px]" />
+                  </div>
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Ingresa tu contrasena"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onFocus={() => setFocusedField("password")}
+                    onBlur={() => setFocusedField(null)}
+                    required
+                    className="pl-11 pr-11 h-12 bg-white rounded-xl text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+                    style={{ borderColor: "#D9E3EF" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 transition-colors duration-200"
+                    style={{ color: "#8496AB" }}
+                    tabIndex={-1}
+                  >
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={showPassword ? "hide" : "show"}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={{ duration: 0.15 }}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="w-[18px] h-[18px]" />
+                        ) : (
+                          <Eye className="w-[18px] h-[18px]" />
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </button>
+                </div>
+              </div>
+
+              {/* Submit */}
+              <div className="pt-2">
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-12 rounded-xl text-sm font-semibold tracking-wide transition-all duration-300 relative overflow-hidden group"
+                  style={{
+                    background: loading ? "#8496AB" : `linear-gradient(135deg, #083D6E 0%, ${HARBOR} 100%)`,
+                    boxShadow: loading ? "none" : "0 4px 16px -3px rgba(11,83,148,0.45), 0 0 0 1px rgba(11,83,148,0.10)",
+                  }}
+                >
+                  <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700" />
+                  {loading ? (
+                    <div className="flex items-center gap-2.5">
+                      <motion.div
+                        className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                      />
+                      <span>Verificando credenciales...</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span>Iniciar sesion</span>
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform duration-200" />
+                    </div>
+                  )}
+                </Button>
+              </div>
+            </form>
+
+            {/* Nota de seguridad */}
+            <div className="mt-7 flex items-center justify-center gap-2 text-xs" style={{ color: "#8496AB" }}>
+              <Shield className="w-3.5 h-3.5" />
+              <span>Conexion protegida con cifrado de extremo a extremo</span>
+            </div>
+
+            {/* Crédito */}
+            <div className="mt-6 pt-5 text-center" style={{ borderTop: "1px solid #E7EEF6" }}>
+              <span
+                className="text-[8.5px] uppercase font-medium block"
+                style={{ fontFamily: "var(--font-jetbrains-mono), monospace", letterSpacing: "0.24em", color: "#8496AB" }}
+              >
                 Desarrollado por
               </span>
-              <span className="text-sm text-[#1E3A5F] font-bold tracking-wide">
+              <span className="text-sm font-bold tracking-wide" style={{ color: HARBOR }}>
                 Maria Camila Mesa
               </span>
             </div>
           </motion.div>
         </div>
+
+        {/* Copyright */}
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.9 }}
+          className="px-10 pb-6 text-[10px]"
+          style={{ fontFamily: "var(--font-jetbrains-mono), monospace", letterSpacing: "0.14em", color: "rgba(255,255,255,0.45)" }}
+        >
+          © {new Date().getFullYear()} IBC STEEL GROUP · TODOS LOS DERECHOS RESERVADOS
+        </motion.p>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Download, Loader2, ClipboardList, RefreshCw, FileDown } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import { generatePDFReport } from "@/lib/pdf-report";
+import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -26,7 +27,7 @@ const fmtDate = (d: string | null | undefined) => {
 
 const fmtNum = (n: number | null | undefined) => {
   if (n == null) return "";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return n.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
 
 // ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ export default function ContractsReportPage() {
 
       // ROW 1: Header
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
+
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
@@ -125,7 +126,7 @@ export default function ContractsReportPage() {
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
+
       r2.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -188,7 +189,7 @@ export default function ContractsReportPage() {
       footerGap.height = 6;
       const footerRowIdx = ws.rowCount + 1;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
+
       const footerCell = ws.getCell(`A${footerRowIdx}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -279,12 +280,13 @@ export default function ContractsReportPage() {
   // ---------------------------------------------------------------------------
 
   return (
+    <div style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, borderRadius: T.radius, boxShadow: T.shadowGlass, padding: "24px 28px" }}>
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E3A5F]">Reporte de Contratos</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Todos los contratos — <span className="font-medium text-slate-700">{contracts.length} registros</span>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink }}>Reporte de Contratos</h1>
+          <p style={{ fontSize: 13, color: T.inkMuted, marginTop: 4 }}>
+            Todos los contratos — <span style={{ fontWeight: 600, color: T.inkSoft }}>{contracts.length} registros</span>
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -296,23 +298,23 @@ export default function ContractsReportPage() {
           <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl border-slate-200" onClick={fetchData}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </Button>
-          <Button size="sm" className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50" variant="outline" onClick={handlePDF}>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl" variant="outline" onClick={handlePDF} style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}>
             <FileDown className="w-3.5 h-3.5" /> Export PDF
           </Button>
-          <Button size="sm" className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25" onClick={handleExport}>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl" onClick={handleExport} style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}>
             <Download className="w-3.5 h-3.5" /> Export Excel
           </Button>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div style={{ borderRadius: T.radiusMd, border: "1px solid " + T.borderLight, overflow: "hidden", boxShadow: T.shadowMd }}>
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-[#1E3A5F]" />
-            <span className="ml-2 text-sm text-slate-500">Cargando contratos...</span>
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: T.accent }} />
+            <span style={{ marginLeft: 8, fontSize: 13, color: T.inkMuted }}>Cargando contratos...</span>
           </div>
         ) : contracts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <div className="flex flex-col items-center justify-center py-20" style={{ color: T.inkLight }}>
             <ClipboardList className="w-10 h-10 mb-3" />
             <p className="text-sm font-medium">No hay contratos registrados</p>
           </div>
@@ -332,9 +334,9 @@ export default function ContractsReportPage() {
               <col style={{ width: "8%" }} />{/* Pdte USD */}
             </colgroup>
             <thead>
-              <tr className="bg-[#1E3A5F]">
+              <tr style={{ background: "rgba(11,83,148,0.03)" }}>
                 {["CONTRATO","CLIENTE","DETALLE","TONS","INCOT.","ESTADO","ETA","MOTONAVE","PUERTO","ANTICIPO","PDTE USD"].map((h) => (
-                  <th key={h} className="px-2 py-2.5 text-[10px] font-bold text-white text-left tracking-wide uppercase">{h}</th>
+                  <th key={h} className="px-2 py-2.5 text-left" style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -366,7 +368,8 @@ export default function ContractsReportPage() {
           </table>
         )}
       </div>
-      <p className="text-[11px] text-slate-400 text-center">Vista previa con columnas clave · El archivo Excel contiene las 20 columnas completas</p>
+      <p style={{ fontSize: 11, color: T.inkLight, textAlign: "center" }}>Vista previa con columnas clave · El archivo Excel contiene las 20 columnas completas</p>
+    </div>
     </div>
   );
 }

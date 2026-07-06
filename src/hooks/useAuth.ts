@@ -85,7 +85,16 @@ export function useAuth() {
 
   const signOut = async () => {
     const supabase = createClient();
-    await supabase.auth.signOut();
+    try {
+      // scope "local" limpia la sesión del navegador sin depender del servidor.
+      // Promise.race evita que un signOut colgado (token expirado) bloquee el redirect.
+      await Promise.race([
+        supabase.auth.signOut({ scope: "local" }),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    } catch {
+      // Aunque falle, forzamos la salida
+    }
     initialized = false;
     setAuthState({ user: null, profile: null, loading: false });
     window.location.href = "/login";

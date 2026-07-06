@@ -21,6 +21,11 @@ const I = {
   payment: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg>,
   invoice: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M4 2v20l4-2 4 2 4-2 4 2V2l-4 2-4-2-4 2Z"/><path d="M16 8h-6"/><path d="M14 12H8"/></svg>,
   quotation: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>,
+  docTracking: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg>,
+  clients: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  cartera: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 0 1 0-4h4"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>,
+  briefcase: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
+  upload: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
 };
 
 // ─── MODULE CARD ─────────────────────────────────────────────
@@ -35,9 +40,10 @@ function ModuleCard({ title, desc, tags, stat, statLabel, icon, accentColor, del
       onClick={() => router.push(href)}
       style={{
         borderRadius: T.radiusMd,
-        background: T.surface,
-        border: `1px solid ${T.borderLight}`,
-        boxShadow: T.shadow,
+        background: T.glassBg,
+        backdropFilter: T.glassBlur,
+        border: `1px solid ${T.glassBorder}`,
+        boxShadow: T.shadowGlass,
         cursor: "pointer",
         overflow: "hidden",
         animation: `rFadeUp 0.45s cubic-bezier(0.4,0,0.2,1) ${delay}ms both`,
@@ -46,12 +52,12 @@ function ModuleCard({ title, desc, tags, stat, statLabel, icon, accentColor, del
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = accentColor + "30";
-        e.currentTarget.style.boxShadow = `0 6px 24px ${accentColor}12, 0 2px 8px rgba(26,29,35,0.04)`;
+        e.currentTarget.style.boxShadow = `0 6px 24px ${accentColor}12, 0 2px 8px rgba(11,83,148,0.04)`;
         e.currentTarget.style.transform = "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = T.borderLight;
-        e.currentTarget.style.boxShadow = T.shadow;
+        e.currentTarget.style.borderColor = T.glassBorder;
+        e.currentTarget.style.boxShadow = T.shadowGlass;
         e.currentTarget.style.transform = "translateY(0)";
       }}
     >
@@ -122,23 +128,56 @@ export default function ReportsHubPage() {
   const router = useRouter();
   const [productionCount, setProductionCount] = useState(0);
   const [contractsCount, setContractsCount] = useState(0);
+  const [clientsCount, setClientsCount] = useState(0);
   const [paymentsCount, setPaymentsCount] = useState(0);
   const [invoicesCount, setInvoicesCount] = useState(0);
   const [quotationsCount, setQuotationsCount] = useState(0);
+  const [docTrackingCount, setDocTrackingCount] = useState(0);
+  const [carteraTotal, setCarteraTotal] = useState(0);
+  const [commercialsCount, setCommercialsCount] = useState(0);
 
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [prodRes, contRes, payRes, invRes] = await Promise.all([
+        const [prodRes, contRes, payRes, invRes, docTrackRes, filtersRes] = await Promise.all([
           fetch("/api/contracts?status=EN PRODUCCIÓN&pageSize=1"),
           fetch("/api/contracts?pageSize=1"),
           fetch("/api/payments?pageSize=1"),
           fetch("/api/invoices?pageSize=1"),
+          fetch("/api/contracts?status=EN TRÁNSITO,EN PRODUCCIÓN&pageSize=5000"),
+          fetch("/api/contracts/filters"),
         ]);
         if (prodRes.ok) { const j = await prodRes.json(); setProductionCount(j.count || 0); }
         if (contRes.ok) { const j = await contRes.json(); setContractsCount(j.count || 0); }
+        if (filtersRes.ok) {
+          const j = await filtersRes.json();
+          setClientsCount((j.client_names || []).length);
+          setCommercialsCount((j.commercial_names || []).length);
+        }
         if (payRes.ok) { const j = await payRes.json(); setPaymentsCount(j.count || 0); }
         if (invRes.ok) { const j = await invRes.json(); setInvoicesCount(j.count || 0); }
+        // Doc tracking: EN TRÁNSITO/PRODUCCIÓN con documentos pendientes,
+        // o con motonave asignada y aún sin enviar documentos.
+        if (docTrackRes.ok) {
+          const all = (await docTrackRes.json()).data || [];
+          const hasPending = (v: string | null | undefined) => !!v && v.trim() !== "" && v !== "Todos enviados";
+          const count = all.filter((c: { status?: string | null; documents_sent?: string | null; documents_pending?: string | null; vessel_name?: string | null }) => {
+            const isTransit = c.status === "EN TRÁNSITO";
+            const isProduction = c.status === "EN PRODUCCIÓN";
+            if (!isTransit && !isProduction) return false;
+            const hasPendingDocs = hasPending(c.documents_pending);
+            const hasSentDocs = !!c.documents_sent && c.documents_sent.trim() !== "";
+            const hasVesselNoDocs = !!c.vessel_name && c.vessel_name.trim() !== "" && !hasSentDocs;
+            if (isTransit) return hasPendingDocs || hasVesselNoDocs;
+            return hasPendingDocs && hasSentDocs;
+          }).length;
+          setDocTrackingCount(count);
+          // Cartera = saldo pendiente por cobrar en tránsito
+          const cartera = all
+            .filter((c: { status?: string | null; pending_client_amount?: number | null }) => c.status === "EN TRÁNSITO" && (c.pending_client_amount ?? 0) > 0)
+            .reduce((s: number, c: { pending_client_amount?: number | null }) => s + (c.pending_client_amount ?? 0), 0);
+          setCarteraTotal(cartera);
+        }
       } catch (err) {
         console.error("Error fetching report counts:", err);
       }
@@ -172,15 +211,18 @@ export default function ReportsHubPage() {
       {/* Header Banner */}
       <div style={{
         position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: T.shadowGlass,
         animation: "rFadeIn 0.4s ease both",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -192,8 +234,8 @@ export default function ReportsHubPage() {
             <div>
               <h1 style={{
                 fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
-                fontSize: 18, fontWeight: 800, color: "#fff",
-                letterSpacing: "-0.02em", lineHeight: 1.2,
+                fontSize: 22, fontWeight: 700, color: "#fff",
+                letterSpacing: "-0.3px", lineHeight: 1.2,
               }}>Reportes</h1>
               <p style={{ fontSize: 12, color: "rgba(191,219,254,0.7)", fontWeight: 500 }}>
                 Reportes gerenciales y de producción
@@ -236,6 +278,50 @@ export default function ReportsHubPage() {
         />
         <ModuleCard
           delay={500}
+          href="/reports/clients"
+          icon={I.clients}
+          accentColor={T.teal}
+          title="Clientes"
+          desc="Contratos agrupados por cliente con filtros, seleccion de campos y exportacion"
+          tags={[
+            { icon: I.table, label: "Datos en vivo" },
+            { icon: I.form, label: "Filtros" },
+            { icon: I.download, label: "Excel / PDF" },
+          ]}
+          stat={String(clientsCount)}
+          statLabel="clientes"
+        />
+        <ModuleCard
+          delay={550}
+          href="/reports/status-commercial"
+          icon={I.briefcase}
+          accentColor={T.violet}
+          title="Status por Comercial"
+          desc="Descarga individual por comercial con producción, embarques, documentos y saldos"
+          tags={[
+            { icon: I.table, label: "Por comercial" },
+            { icon: I.download, label: "Excel" },
+          ]}
+          stat={String(commercialsCount)}
+          statLabel="comerciales"
+        />
+        <ModuleCard
+          delay={575}
+          href="/reports/cartera"
+          icon={I.cartera}
+          accentColor={T.warning}
+          title="Cartera"
+          desc="Cuentas por cobrar: saldos pendientes, deadline de pago y estado (atrasado/al día)"
+          tags={[
+            { icon: I.table, label: "Datos en vivo" },
+            { icon: I.form, label: "Filtros" },
+            { icon: I.download, label: "Excel / PDF" },
+          ]}
+          stat={carteraTotal >= 1_000_000 ? `$${(carteraTotal / 1_000_000).toFixed(2)}M` : carteraTotal >= 1_000 ? `$${(carteraTotal / 1_000).toFixed(0)}K` : `$${carteraTotal.toFixed(0)}`}
+          statLabel="por cobrar"
+        />
+        <ModuleCard
+          delay={650}
           href="/reports/payments"
           icon={I.payment}
           accentColor={T.success}
@@ -249,7 +335,7 @@ export default function ReportsHubPage() {
           statLabel="pagos"
         />
         <ModuleCard
-          delay={600}
+          delay={700}
           href="/reports/invoices"
           icon={I.invoice}
           accentColor={T.violet}
@@ -263,7 +349,7 @@ export default function ReportsHubPage() {
           statLabel="facturas"
         />
         <ModuleCard
-          delay={700}
+          delay={800}
           href="/reports/quotations"
           icon={I.quotation}
           accentColor={T.orange}
@@ -275,6 +361,20 @@ export default function ReportsHubPage() {
           ]}
           stat={String(quotationsCount)}
           statLabel="cotizaciones"
+        />
+        <ModuleCard
+          delay={900}
+          href="/reports/document-tracking"
+          icon={I.docTracking}
+          accentColor={T.teal}
+          title="Documentos"
+          desc="Seguimiento de documentos enviados y pendientes por embarque"
+          tags={[
+            { icon: I.table, label: "Datos en vivo" },
+            { icon: I.download, label: "Excel" },
+          ]}
+          stat={String(docTrackingCount)}
+          statLabel="embarques"
         />
       </div>
 

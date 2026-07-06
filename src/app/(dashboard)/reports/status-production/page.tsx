@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Download, Loader2, Factory, RefreshCw, FileDown } from "lucide-react";
+import { Download, Loader2, Factory, RefreshCw, FileDown, Presentation, Ship, Upload, X } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import { generatePDFReport } from "@/lib/pdf-report";
+import { generateStatusMeetingHTML } from "@/lib/html-status-meeting";
+import { parseStatusProductionExcel } from "@/lib/status-production-import";
+import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -58,6 +62,7 @@ const fmtDate = (d: string | null | undefined) => {
   }
 };
 
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -66,6 +71,313 @@ export default function StatusProductionPage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [manualData, setManualData] = useState<ManualDataMap>(loadManualData);
+  const [fileNumber, setFileNumber] = useState<string>(() =>
+    String(new Date().getMonth() + 1).padStart(2, "0")
+  );
+  const [transforming, setTransforming] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  // Overrides de transformación: cambios del reporte anexado que la usuaria
+  // decidió NO guardar en los contratos, pero que sí deben reflejarse en el
+  // HTML de reunión. Viven solo en memoria (se pierden al recargar).
+  type TransformOverride = { vessel_name?: string; etd?: string; notes?: string };
+  const [transformOverrides, setTransformOverrides] = useState<Record<string, TransformOverride> | null>(null);
+
+  // ── Cambios manuales pendientes de aplicar a los contratos ──
+  // Motonave escrita distinta a la del contrato, o fecha de zarpe (etd) nueva.
+  const pendingUpdates = contracts.reduce((acc, c) => {
+    if (!c.id) return acc;
+    const m = manualData[c.id];
+    if (!m) return acc;
+    const upd: { id: string; vessel_name?: string; etd?: string } = { id: c.id };
+    const v = (m.vessel_name || "").trim();
+    if (v && v.toUpperCase() !== (c.vessel_name || "").trim().toUpperCase()) upd.vessel_name = v;
+    const d = (m.estimated_departure || "").trim();
+    if (d && d !== (c.etd || "").split("T")[0]) upd.etd = d;
+    if (upd.vessel_name || upd.etd) acc.push(upd);
+    return acc;
+  }, [] as { id: string; vessel_name?: string; etd?: string }[]);
+
+  // ── Anexar reporte devuelto por China ──
+  // China devuelve el mismo Excel exportado desde esta página, con
+  // VESSEL NAME / ESTIMATED DEPARTURE DATE / ADDITIONAL NOTES diligenciados.
+  // Se cruza por CUSTOMER CONTRACT (fallback CHINA CONTRACT) y se aplican
+  // los cambios a los contratos previa vista previa.
+  interface ImportChange {
+    id: string;
+    client: string;
+    ref: string;
+    vesselFrom: string;
+    vesselTo?: string;
+    etdFrom: string;
+    etdTo?: string;
+    note?: string;
+  }
+  const [importPreview, setImportPreview] = useState<{ changes: ImportChange[]; unmatched: string[]; notesOnly: number } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const normKey = (s: string | null | undefined) => (s || "").trim().toUpperCase();
+
+  const handleAttachFile = async (file: File) => {
+    setImporting(true);
+    try {
+      const rows = await parseStatusProductionExcel(await file.arrayBuffer());
+      if (rows.length === 0) {
+        toast.error("El archivo no contiene filas de datos");
+        return;
+      }
+
+      // Índices de contratos cargados (EN PRODUCCIÓN, los mismos del export)
+      const byRef = new Map<string, Contract>();
+      const byCn = new Map<string, Contract>();
+      for (const c of contracts) {
+        if (c.client_contract) byRef.set(normKey(c.client_contract), c);
+        if (c.china_contract) byCn.set(normKey(c.china_contract), c);
+      }
+
+      const changes: ImportChange[] = [];
+      const unmatched: string[] = [];
+      let notesOnly = 0;
+
+      for (const r of rows) {
+        const c = (r.ref && byRef.get(normKey(r.ref))) || (r.cn && byCn.get(normKey(r.cn))) || null;
+        if (!c || !c.id) {
+          unmatched.push(r.ref || r.cn || "(sin contrato)");
+          continue;
+        }
+
+        const change: ImportChange = {
+          id: c.id,
+          client: c.client_name || "",
+          ref: c.client_contract || c.china_contract || "",
+          vesselFrom: c.vessel_name || "—",
+          etdFrom: c.etd ? fmtDate(c.etd) : "—",
+        };
+
+        const vessel = (r.vessel || "").trim();
+        if (vessel && normKey(vessel) !== normKey(c.vessel_name)) {
+          change.vesselTo = vessel;
+        }
+        if (r.departureISO && r.departureISO !== (c.etd || "").split("T")[0]) {
+          change.etdTo = r.departureISO;
+        }
+        // Nota: texto de zarpe no interpretable ("FIN JUL") se conserva como nota.
+        // Si la nota devuelta es la misma que ya tiene el contrato (venía
+        // pre-llenada en el export), no cuenta como novedad.
+        const returnedNote = (r.notes || "").trim();
+        const noteIsNew = returnedNote !== "" && returnedNote !== (c.notes || "").trim();
+        const noteParts = [noteIsNew ? returnedNote : null, r.departureText ? `Zarpe: ${r.departureText}` : null].filter(Boolean);
+        if (noteParts.length > 0) change.note = noteParts.join(" · ");
+
+        if (change.vesselTo || change.etdTo) {
+          changes.push(change);
+        } else if (change.note) {
+          notesOnly += 1;
+          changes.push(change);
+        }
+      }
+
+      if (changes.length === 0) {
+        toast.info(`Sin cambios: el reporte anexado coincide con lo que ya está registrado${unmatched.length ? ` (${unmatched.length} filas sin cruce)` : ""}`);
+        return;
+      }
+      setImportPreview({ changes, unmatched, notesOnly });
+    } catch (err) {
+      console.error(err);
+      toast.error((err as Error).message || "No se pudo leer el archivo");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+    setImporting(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const ch of importPreview.changes) {
+        if (!ch.vesselTo && !ch.etdTo && !ch.note) continue;
+        // Las notas de China van al CONTRATO (las lee el reporte de reunión),
+        // no al borrador local — así el próximo reporte inicial sale limpio.
+        const body: { id: string; vessel_name?: string; etd?: string; notes?: string } = { id: ch.id };
+        if (ch.vesselTo) body.vessel_name = ch.vesselTo;
+        if (ch.etdTo) body.etd = ch.etdTo;
+        if (ch.note) body.notes = ch.note;
+        const res = await fetch("/api/contracts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) ok += 1;
+        else {
+          fail += 1;
+          const j = await res.json().catch(() => ({}));
+          console.error("Error actualizando contrato", ch.id, j.error);
+        }
+      }
+      if (ok > 0) {
+        fetchContracts();
+        setTransformOverrides(null); // los datos ya viven en los contratos
+        // Paso siguiente del flujo: transformar el reporte ya cruzado
+        toast.success(`Reporte anexado: ${ok} embarque${ok !== 1 ? "s" : ""} actualizado${ok !== 1 ? "s" : ""}`, {
+          description: "Los datos quedaron cruzados con el módulo de contratos.",
+          action: {
+            label: "Transformar reporte",
+            onClick: () => handleTransform(),
+          },
+          duration: 12000,
+        });
+      }
+      if (fail > 0) toast.error(`${fail} embarque${fail !== 1 ? "s" : ""} no se pudo actualizar`);
+      if (ok === 0 && fail === 0) toast.info("No había cambios que aplicar");
+    } finally {
+      setImporting(false);
+      setImportPreview(null);
+    }
+  };
+
+  // ── Limpieza de notas de borrador (localStorage) ──
+  // Notas guardadas localmente de sesiones anteriores; el reporte inicial
+  // debe salir con ADDITIONAL NOTES vacío.
+  const draftNotesCount = contracts.filter(
+    (c) => c.id && (manualData[c.id]?.additional_notes || "").trim() !== ""
+  ).length;
+
+  const handleClearDraftNotes = () => {
+    setManualData((prev) => {
+      const updated: ManualDataMap = {};
+      for (const [id, entry] of Object.entries(prev)) {
+        updated[id] = { ...entry, additional_notes: "" };
+      }
+      saveManualData(updated);
+      return updated;
+    });
+    toast.success("Notas de borrador limpiadas — el reporte saldrá con notas vacías");
+  };
+
+  // Aplica motonave + fecha de zarpe manuales directamente a los contratos
+  const handleApplyToContracts = async () => {
+    if (pendingUpdates.length === 0) return;
+    setApplying(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const upd of pendingUpdates) {
+        const res = await fetch("/api/contracts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(upd),
+        });
+        if (res.ok) {
+          ok += 1;
+          // Limpiar los campos aplicados del borrador local (conservar notas)
+          setManualData((prev) => {
+            const entry = prev[upd.id];
+            if (!entry) return prev;
+            const updated = {
+              ...prev,
+              [upd.id]: {
+                ...entry,
+                vessel_name: upd.vessel_name ? "" : entry.vessel_name,
+                estimated_departure: upd.etd ? "" : entry.estimated_departure,
+              },
+            };
+            saveManualData(updated);
+            return updated;
+          });
+        } else {
+          fail += 1;
+          const j = await res.json().catch(() => ({}));
+          console.error("Error actualizando contrato", upd.id, j.error);
+        }
+      }
+      if (ok > 0) {
+        toast.success(`${ok} embarque${ok !== 1 ? "s" : ""} actualizado${ok !== 1 ? "s" : ""} (motonave / fecha de zarpe)`);
+        fetchContracts();
+      }
+      if (fail > 0) {
+        toast.error(`${fail} embarque${fail !== 1 ? "s" : ""} no se pudo actualizar`);
+      }
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  // ── Transformar reporte: HTML ejecutivo para reunión ──
+  // Incluye EN PRODUCCIÓN + EN TRÁNSITO para clasificar por etapa operativa
+  // (en producción / nominado por zarpar / en tránsito / equipos).
+  const handleTransform = async (overridesArg?: Record<string, TransformOverride>) => {
+    // Overrides pasados directamente (Ignorar y transformar) o los que
+    // quedaron en memoria de un anexo previo no aplicado.
+    const overrides = overridesArg ?? transformOverrides;
+    setTransforming(true);
+    try {
+      toast.info("Generando reporte de reunión...");
+      const res = await fetch(
+        "/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=1&sort_field=client_name&sort_direction=asc"
+      );
+      if (!res.ok) throw new Error("Error al obtener contratos");
+      const json = await res.json();
+      let all: Contract[] = json.data || [];
+      // Paginar si hay más de 200
+      const total: number = json.count ?? all.length;
+      let page = 2;
+      while (all.length < total && page <= 10) {
+        const r = await fetch(
+          `/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=${page}&sort_field=client_name&sort_direction=asc`
+        );
+        if (!r.ok) break;
+        const j = await r.json();
+        const batch: Contract[] = j.data || [];
+        if (batch.length === 0) break;
+        all = all.concat(batch);
+        page += 1;
+      }
+
+      // Superponer los cambios ignorados (solo para esta transformación)
+      if (overrides) {
+        all = all.map((c) => {
+          const o = c.id ? overrides[c.id] : undefined;
+          if (!o) return c;
+          return {
+            ...c,
+            vessel_name: o.vessel_name ?? c.vessel_name,
+            etd: o.etd ?? c.etd,
+            notes: o.notes ?? c.notes,
+          };
+        });
+      }
+
+      const html = generateStatusMeetingHTML(all);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      // Descargar archivo
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, "0");
+      const mm = String(today.getMonth() + 1).padStart(2, "0");
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `IBC_Status_Produccion_Resumen_${dd}-${mm}-${today.getFullYear()}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Abrir en pestaña nueva para presentar de una vez
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+      toast.success("Reporte de reunión generado");
+    } catch (err) {
+      console.error(err);
+      toast.error("Error al generar el reporte de reunión");
+    } finally {
+      setTransforming(false);
+    }
+  };
 
   const fetchContracts = useCallback(async () => {
     setLoading(true);
@@ -88,7 +400,9 @@ export default function StatusProductionPage() {
     fetchContracts();
   }, [fetchContracts]);
 
-  // Get manual field value, with pre-populate fallback from contract.vessel_name
+  // Get manual field value, con pre-llenado desde el contrato si no hay entrada
+  // manual: motonave, fecha de zarpe (ETD) y notas ya registradas se muestran
+  // para que China las confirme o las corrija.
   const getManualField = (
     contract: Contract,
     field: keyof ManualReportData
@@ -97,10 +411,13 @@ export default function StatusProductionPage() {
     if (entry && entry[field] !== undefined && entry[field] !== "") {
       return entry[field];
     }
-    // Pre-populate vessel_name from contract if no manual entry
     if (field === "vessel_name" && contract.vessel_name) {
       return contract.vessel_name;
     }
+    if (field === "estimated_departure" && contract.etd) {
+      return contract.etd.split("T")[0];
+    }
+    // additional_notes NO se pre-llena: es el espacio de China para responder
     return "";
   };
 
@@ -175,7 +492,7 @@ export default function StatusProductionPage() {
 
       // ROW 1: Unified header
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
+
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: "Aptos", size: 16, color: { argb: NAVY } } },
@@ -194,7 +511,7 @@ export default function StatusProductionPage() {
 
       // ROW 2: Spacer
       const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
+
       r2.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -235,9 +552,12 @@ export default function StatusProductionPage() {
         };
         const vesselVal =
           manual.vessel_name || c.vessel_name || "";
+        // Pre-llenar con el ETD del contrato: China confirma o corrige.
+        // Las notas van vacías: son el espacio de respuesta de China.
         const departureVal = manual.estimated_departure
           ? fmtDate(manual.estimated_departure)
-          : "";
+          : fmtDate(c.etd);
+        const notesVal = manual.additional_notes || "";
 
         const row = ws.addRow([
           c.client_name || "",
@@ -248,7 +568,7 @@ export default function StatusProductionPage() {
           fmtDate(c.exw_date),
           vesselVal,
           departureVal,
-          manual.additional_notes || "",
+          notesVal,
         ]);
 
         const isEven = idx % 2 === 0;
@@ -337,7 +657,7 @@ export default function StatusProductionPage() {
       footerGap.height = 6;
       const footerRowIdx = ws.rowCount + 1;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
+
       const footerCell = ws.getCell(`A${footerRowIdx}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -371,7 +691,10 @@ export default function StatusProductionPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `STATUS_PRODUCTION_${now.toISOString().slice(0, 10)}.xlsx`;
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const prefix = (fileNumber.trim() || mm).padStart(2, "0");
+      link.download = `${prefix}. STATUS PRODUCTION ${dd}-${mm}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -396,10 +719,15 @@ export default function StatusProductionPage() {
   const handlePDF = async () => {
     try {
       toast.info("Generando PDF...");
+      const pdfNow = new Date();
+      const pdfDd = String(pdfNow.getDate()).padStart(2, "0");
+      const pdfMm = String(pdfNow.getMonth() + 1).padStart(2, "0");
+      const pdfPrefix = (fileNumber.trim() || pdfMm).padStart(2, "0");
       await generatePDFReport({
         title: "STATUS PRODUCTION",
         subtitle: "Contracts in production",
-        filename: "STATUS_PRODUCTION",
+        filename: `${pdfPrefix}. STATUS PRODUCTION ${pdfDd}-${pdfMm}`,
+        appendDate: false,
         recordLabel: "contracts",
         orientation: "landscape",
         columns: [
@@ -423,7 +751,7 @@ export default function StatusProductionPage() {
             detail: c.detail || "",
             exw: fmtDate(c.exw_date),
             vessel: manual.vessel_name || c.vessel_name || "",
-            departure: manual.estimated_departure ? fmtDate(manual.estimated_departure) : "",
+            departure: manual.estimated_departure ? fmtDate(manual.estimated_departure) : fmtDate(c.etd),
             notes: manual.additional_notes || "",
           };
         }),
@@ -440,16 +768,17 @@ export default function StatusProductionPage() {
   // ---------------------------------------------------------------------------
 
   return (
+    <div style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, borderRadius: T.radius, boxShadow: T.shadowGlass, padding: "24px 28px" }}>
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E3A5F]">
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink }}>
             Status Production
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p style={{ fontSize: 13, color: T.inkMuted, marginTop: 4 }}>
             Contracts in production —{" "}
-            <span className="font-medium text-slate-700">
+            <span style={{ fontWeight: 600, color: T.inkSoft }}>
               {contracts.length} records
             </span>
           </p>
@@ -474,11 +803,94 @@ export default function StatusProductionPage() {
             Refresh
           </Button>
 
+          {pendingUpdates.length > 0 && (
+            <Button
+              size="sm"
+              className="h-9 gap-1.5 rounded-xl"
+              onClick={handleApplyToContracts}
+              disabled={applying}
+              title="Guarda en los contratos las motonaves y fechas de zarpe escritas en la tabla"
+              style={{ background: T.success, border: "none", boxShadow: T.shadowMd, color: "white" }}
+            >
+              {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ship className="w-3.5 h-3.5" />}
+              Aplicar a embarques ({pendingUpdates.length})
+            </Button>
+          )}
+
+          {draftNotesCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-xl border-slate-200"
+              onClick={handleClearDraftNotes}
+              title="Vacía las notas de borrador guardadas en este navegador para que el reporte salga limpio"
+            >
+              <X className="w-3.5 h-3.5" />
+              Limpiar notas ({draftNotesCount})
+            </Button>
+          )}
+
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,.xlsm,.xls"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleAttachFile(f);
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl border-slate-200"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            title="Anexa el Excel devuelto por el equipo de China para actualizar motonaves y fechas de zarpe"
+          >
+            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+            Anexar reporte
+          </Button>
+
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-slate-200 bg-white h-9">
+            <label
+              htmlFor="file-number"
+              className="text-xs font-medium"
+              style={{ color: T.inkSoft }}
+              title="Número que aparecerá al inicio del nombre del archivo (ej. 04. STATUS PRODUCTION 23-04)"
+            >
+              N°
+            </label>
+            <input
+              id="file-number"
+              type="text"
+              inputMode="numeric"
+              maxLength={2}
+              value={fileNumber}
+              onChange={(e) => setFileNumber(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              className="w-8 text-center text-sm font-semibold bg-transparent outline-none"
+              style={{ color: T.ink }}
+            />
+          </div>
+
           <Button
             size="sm"
-            className="h-9 gap-1.5 rounded-xl border-red-200 text-red-700 hover:bg-red-50"
+            className="h-9 gap-1.5 rounded-xl"
+            onClick={() => handleTransform()}
+            disabled={transforming}
+            title="Genera el resumen ejecutivo HTML para leer en la reunión"
+            style={{ background: "linear-gradient(135deg, #0B72B8, #00B8E0)", border: "none", boxShadow: T.shadowMd, color: "white" }}
+          >
+            {transforming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Presentation className="w-3.5 h-3.5" />}
+            Transformar reporte
+          </Button>
+
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 rounded-xl"
             variant="outline"
             onClick={handlePDF}
+            style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}
           >
             <FileDown className="w-3.5 h-3.5" />
             Export PDF
@@ -486,8 +898,9 @@ export default function StatusProductionPage() {
 
           <Button
             size="sm"
-            className="h-9 gap-1.5 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25"
+            className="h-9 gap-1.5 rounded-xl"
             onClick={handleExport}
+            style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}
           >
             <Download className="w-3.5 h-3.5" />
             Export Excel
@@ -496,16 +909,16 @@ export default function StatusProductionPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div style={{ borderRadius: T.radiusMd, border: "1px solid " + T.borderLight, overflow: "hidden", boxShadow: T.shadowMd }}>
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-[#1E3A5F]" />
-            <span className="ml-2 text-sm text-slate-500">
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: T.accent }} />
+            <span style={{ marginLeft: 8, fontSize: 13, color: T.inkMuted }}>
               Loading contracts...
             </span>
           </div>
         ) : contracts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <div className="flex flex-col items-center justify-center py-20" style={{ color: T.inkLight }}>
             <Factory className="w-10 h-10 mb-3" />
             <p className="text-sm font-medium">
               No contracts in production
@@ -515,33 +928,33 @@ export default function StatusProductionPage() {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-[#1E3A5F] hover:bg-[#1E3A5F]">
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap">
+                <TableRow style={{ background: "rgba(11,83,148,0.03)" }} className="hover:bg-transparent">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap">
                     CUSTOMER
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap">
                     CUSTOMER CONTRACT
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap">
                     CHINA CONTRACT
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap text-center">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap text-center">
                     INCOTERM
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap">
                     DETAIL
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap text-center">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap text-center">
                     EXW
                   </TableHead>
                   {/* Editable columns - highlighted header */}
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap bg-blue-700/50">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(11,83,148,0.06)" }} className="whitespace-nowrap">
                     VESSEL NAME
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap bg-blue-700/50 text-center">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(11,83,148,0.06)" }} className="whitespace-nowrap text-center">
                     ESTIMATED DEPARTURE DATE
                   </TableHead>
-                  <TableHead className="text-white font-semibold text-xs whitespace-nowrap bg-blue-700/50">
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(11,83,148,0.06)" }} className="whitespace-nowrap">
                     ADDITIONAL NOTES
                   </TableHead>
                 </TableRow>
@@ -578,7 +991,6 @@ export default function StatusProductionPage() {
                     <TableCell className="text-xs text-center text-slate-600 whitespace-nowrap">
                       {fmtDate(c.exw_date)}
                     </TableCell>
-
                     {/* G: VESSEL NAME (editable) */}
                     <TableCell className="p-1 bg-blue-50/40">
                       <input
@@ -633,6 +1045,131 @@ export default function StatusProductionPage() {
           </div>
         )}
       </div>
+
+      {/* ── Vista previa del reporte anexado ──
+          Portal al body: los ancestros animados (transform) rompen position:fixed */}
+      {importPreview && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div
+            style={{ position: "absolute", inset: 0, background: "rgba(6,27,46,0.55)", backdropFilter: "blur(8px)" }}
+            onClick={() => setImportPreview(null)}
+          />
+          <div style={{
+            position: "relative", width: "100%", maxWidth: 780, maxHeight: "84vh",
+            display: "flex", flexDirection: "column",
+            background: T.surface, borderRadius: 18, border: `1px solid ${T.borderLight}`,
+            boxShadow: "0 32px 64px -12px rgba(6,27,46,0.35)", overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "16px 22px", background: T.gradientPrimary, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>Cambios del reporte anexado</div>
+                <div style={{ fontSize: 11.5, color: "rgba(207,224,240,0.85)", marginTop: 2 }}>
+                  {importPreview.changes.length} embarque{importPreview.changes.length !== 1 ? "s" : ""} con novedades
+                  {importPreview.unmatched.length > 0 && ` · ${importPreview.unmatched.length} fila${importPreview.unmatched.length !== 1 ? "s" : ""} sin cruce`}
+                </div>
+              </div>
+              <button
+                onClick={() => setImportPreview(null)}
+                style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.16)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 22px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.2fr 1fr", gap: 10, padding: "0 0 8px", borderBottom: `1px solid ${T.border}` }}>
+                {["Embarque", "Motonave", "Fecha de zarpe"].map((h) => (
+                  <span key={h} style={{ fontSize: 9.5, fontWeight: 700, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.08em" }}>{h}</span>
+                ))}
+              </div>
+              {importPreview.changes.map((ch) => (
+                <div key={ch.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 1.2fr 1fr", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${T.borderLight}` }}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{ch.client}</div>
+                    <div style={{ fontSize: 10.5, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{ch.ref}</div>
+                    {ch.note && <div style={{ fontSize: 10.5, color: T.inkMuted, marginTop: 2 }}>Nota: {ch.note}</div>}
+                  </div>
+                  <div style={{ fontSize: 12 }}>
+                    {ch.vesselTo ? (
+                      <>
+                        <span style={{ color: T.inkLight, textDecoration: "line-through" }}>{ch.vesselFrom}</span>
+                        <span style={{ margin: "0 6px", color: T.inkGhost }}>→</span>
+                        <span style={{ fontWeight: 700, color: T.success }}>{ch.vesselTo.toUpperCase()}</span>
+                      </>
+                    ) : (
+                      <span style={{ color: T.inkLight }}>{ch.vesselFrom}</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+                    {ch.etdTo ? (
+                      <>
+                        <span style={{ color: T.inkLight, textDecoration: "line-through" }}>{ch.etdFrom}</span>
+                        <span style={{ margin: "0 6px", color: T.inkGhost }}>→</span>
+                        <span style={{ fontWeight: 700, color: T.success }}>{fmtDate(ch.etdTo)}</span>
+                      </>
+                    ) : (
+                      <span style={{ color: T.inkLight }}>{ch.etdFrom}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {importPreview.unmatched.length > 0 && (
+                <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: T.warningBg, border: `1px solid ${T.warning}30`, fontSize: 11.5, color: T.inkSoft }}>
+                  <strong style={{ color: T.warning }}>Sin cruce:</strong> {importPreview.unmatched.slice(0, 8).join(", ")}{importPreview.unmatched.length > 8 ? "…" : ""}
+                  <span style={{ color: T.inkMuted }}> — no coinciden con contratos EN PRODUCCIÓN cargados.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: "14px 22px", borderTop: `1px solid ${T.borderLight}`, display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <Button variant="outline" size="sm" className="h-9 rounded-xl" onClick={() => setImportPreview(null)} disabled={importing}>
+                Cancelar
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 rounded-xl"
+                disabled={importing || transforming}
+                title="No guarda nada en los contratos, pero genera el reporte de reunión incluyendo estos cambios"
+                onClick={() => {
+                  const overrides: Record<string, TransformOverride> = {};
+                  for (const ch of importPreview.changes) {
+                    overrides[ch.id] = {
+                      ...(ch.vesselTo ? { vessel_name: ch.vesselTo } : {}),
+                      ...(ch.etdTo ? { etd: ch.etdTo } : {}),
+                      ...(ch.note ? { notes: ch.note } : {}),
+                    };
+                  }
+                  setTransformOverrides(overrides);
+                  setImportPreview(null);
+                  toast.info("Cambios NO guardados en contratos — solo se reflejarán en el reporte de reunión");
+                  handleTransform(overrides);
+                }}
+                style={{ borderColor: "#00B8E0", color: "#0089A8" }}
+              >
+                {transforming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Presentation className="w-3.5 h-3.5" />}
+                Ignorar y transformar
+              </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-1.5 rounded-xl"
+                onClick={handleConfirmImport}
+                disabled={importing}
+                style={{ background: T.success, border: "none", color: "white" }}
+              >
+                {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ship className="w-3.5 h-3.5" />}
+                Aplicar cambios ({importPreview.changes.length})
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
     </div>
   );
 }

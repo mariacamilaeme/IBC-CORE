@@ -10,15 +10,20 @@ const TabIcons = {
   payments: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg>,
   invoices: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M4 2v20l4-2 4 2 4-2 4 2V2l-4 2-4-2-4 2Z"/><path d="M16 8h-6"/><path d="M14 12H8"/></svg>,
   quotations: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>,
+  documentTracking: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg>,
+  cartera: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-3a2 2 0 0 1 0-4h4"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>,
   back: <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>,
 };
 
 const TABS = [
   { key: "status-production", label: "Status Production", href: "/reports/status-production", icon: TabIcons.statusProduction },
   { key: "contracts", label: "Contratos", href: "/reports/contracts", icon: TabIcons.contracts },
+  { key: "clients", label: "Clientes", href: "/reports/clients", icon: TabIcons.contracts },
+  { key: "cartera", label: "Cartera", href: "/reports/cartera", icon: TabIcons.cartera },
   { key: "payments", label: "Pagos", href: "/reports/payments", icon: TabIcons.payments },
   { key: "invoices", label: "Facturas", href: "/reports/invoices", icon: TabIcons.invoices },
   { key: "quotations", label: "Cotizaciones", href: "/reports/quotations", icon: TabIcons.quotations },
+  { key: "document-tracking", label: "Documentos", href: "/reports/document-tracking", icon: TabIcons.documentTracking },
 ] as const;
 
 export default function ReportsLayout({

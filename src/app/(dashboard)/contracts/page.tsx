@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
-import { generatePDFReport } from "@/lib/pdf-report";
+import { generatePDFReport, type PDFColumn } from "@/lib/pdf-report";
+import ColumnSelector from "@/components/documents/ColumnSelector";
 import {
   Plus,
   Search,
@@ -42,10 +44,12 @@ import {
   Truck,
   Hash,
   Weight,
+  Check,
   CheckCircle2,
   Info,
   Copy,
   ExternalLink,
+  Trash2,
 } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -107,6 +111,9 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useCommercials } from "@/hooks/useCommercials";
 
+// ─── DESIGN TOKENS ───────────────────────────────────────────
+import { T } from "@/lib/design-tokens";
+
 // =====================================================
 // Constants
 // =====================================================
@@ -135,13 +142,73 @@ const ALL_DOCUMENTS = [
   { key: "Lista de empaque", label: "Lista de empaque", conditional: null },
   { key: "Borrador del BL", label: "Borrador del BL", conditional: null },
   { key: "MTC", label: "MTC", conditional: "MP" },
-  { key: "COPIA BL", label: "Copia BL", conditional: null },
   { key: "Delivery report", label: "Delivery report", conditional: null },
   { key: "Freight Certificate", label: "Freight Certificate", conditional: null },
   { key: "BL FINAL", label: "BL Final", conditional: null },
   { key: "Certificado de Origen", label: "Certificado de Origen", conditional: null },
   { key: "Insurance copy", label: "Insurance copy", conditional: "CIF" },
 ];
+
+// Map abbreviations (from Excel migration) to standard keys
+const DOC_ALIAS_MAP: Record<string, string> = {
+  "invoice": "Factura",
+  "pl": "Lista de empaque",
+  "packing list": "Lista de empaque",
+  "pl.": "Lista de empaque",
+  "bl draft": "Borrador del BL",
+  "draft bl": "Borrador del BL",
+  "bl draf": "Borrador del BL",
+  "draf bl": "Borrador del BL",
+  "bl drfat": "Borrador del BL",
+  "bl drft": "Borrador del BL",
+  "copia bl": "Borrador del BL",
+  "draft  bl": "Borrador del BL",
+  "draft bl ": "Borrador del BL",
+  "bl draft.": "Borrador del BL",
+  "mtc.": "MTC",
+  "mt": "MTC",
+  "dr": "Delivery report",
+  "dr.": "Delivery report",
+  "deliver": "Delivery report",
+  "delivery report": "Delivery report",
+  "fc": "Freight Certificate",
+  "freight certificate": "Freight Certificate",
+  "bl final": "BL FINAL",
+  "final bl": "BL FINAL",
+  "bl copy": "BL FINAL",
+  "co": "Certificado de Origen",
+  "co copy": "Certificado de Origen",
+  "insurance": "Insurance copy",
+  "insurance copy": "Insurance copy",
+};
+
+/** Normalize a single document token to its standard key */
+function normalizeDocToken(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  // Already a standard key?
+  if (ALL_DOCUMENTS.some((d) => d.key === trimmed)) return trimmed;
+  // Lookup alias (case-insensitive)
+  return DOC_ALIAS_MAP[trimmed.toLowerCase()] || trimmed;
+}
+
+/** Normalize a comma-separated documents_sent string, dedup, and return in standard order */
+function normalizeDocsSent(sentStr: string | null | undefined): string[] {
+  if (!sentStr) return [];
+  const tokens = sentStr.split(/,/).map((s) => s.trim()).filter(Boolean);
+  const normalized = new Set<string>();
+  for (const t of tokens) {
+    const lower = t.toLowerCase();
+    // Handle concatenated "MTCDR"
+    if (lower === "mtcdr") { normalized.add("MTC"); normalized.add("Delivery report"); continue; }
+    const n = normalizeDocToken(t);
+    if (n) normalized.add(n);
+  }
+  // Return in ALL_DOCUMENTS order
+  const ordered = ALL_DOCUMENTS.filter((d) => normalized.has(d.key)).map((d) => d.key);
+  for (const n of normalized) { if (!ordered.includes(n)) ordered.push(n); }
+  return ordered;
+}
 
 const ALL_STATUSES: ContractStatus[] = [
   "ENTREGADO AL CLIENTE",
@@ -360,18 +427,17 @@ function ReadOnlyField({
   const a = accent || "slate";
   return (
     <div className={cn(
-      "group relative rounded-xl px-3.5 py-2.5 bg-gradient-to-br border transition-all duration-200",
-      "hover:shadow-sm hover:scale-[1.01]",
+      "relative rounded-lg px-2.5 py-2 bg-gradient-to-br border",
       accentColors[a]
     )}>
-      <div className="flex items-center gap-1.5 mb-1">
-        {Icon && <Icon className={cn("h-3 w-3", iconColors[a])} />}
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      <div className="flex items-center gap-1 mb-0.5">
+        {Icon && <Icon className={cn("h-2.5 w-2.5", iconColors[a])} />}
+        <p className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: T.inkLight }}>{label}</p>
       </div>
       <p className={cn(
-        "text-sm font-medium",
-        isEmpty ? "text-slate-300 italic" : "text-slate-800"
-      )}>{displayValue}</p>
+        "text-[13px] font-semibold leading-tight",
+        isEmpty ? "text-slate-300 italic" : ""
+      )} style={!isEmpty ? { color: T.ink } : undefined}>{displayValue}</p>
     </div>
   );
 }
@@ -380,7 +446,7 @@ function ReadOnlyField({
 // Main Page Component
 // =====================================================
 export default function ContractsPage() {
-  const { user } = useAuth();
+  const { user, profile: authProfile } = useAuth();
   const {
     commercials: COMMERCIAL_NAMES,
     addCommercial,
@@ -406,9 +472,14 @@ export default function ContractsPage() {
   const [filterVessel, setFilterVessel] = useState<string[]>([]);
   const [filterPort, setFilterPort] = useState<string[]>([]);
   const [filterBlReleased, setFilterBlReleased] = useState<string[]>([]);
+  const [filterDocsSent, setFilterDocsSent] = useState<string[]>([]);
+  const [filterDocsPending, setFilterDocsPending] = useState<string[]>([]);
   const [filterEtaFinal, setFilterEtaFinal] = useState<string[]>([]);
   const [filterDateFrom, setFilterDateFrom] = useState<string>("");
   const [filterDateTo, setFilterDateTo] = useState<string>("");
+  const [selectedYears, setSelectedYears] = useState<string[]>([]);
+  const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+  const yearDropdownRef = useRef<HTMLDivElement>(null);
 
   // Filter drill-down state
   const [activeFilterPanel, setActiveFilterPanel] = useState<string | null>(null);
@@ -491,6 +562,11 @@ export default function ContractsPage() {
   const [annulDialogOpen, setAnnulDialogOpen] = useState(false);
   const [contractToAnnul, setContractToAnnul] = useState<Contract | null>(null);
 
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [contractToDelete, setContractToDelete] = useState<Contract | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Summary counts
   const [summaryCounts, setSummaryCounts] = useState({
     pendienteAnticipo: 0,
@@ -534,10 +610,24 @@ export default function ContractsPage() {
     if (blReleased) setFilterBlReleased(blReleased.split(",").filter(Boolean));
     const etaFinal = params.get("eta_final");
     if (etaFinal) setFilterEtaFinal(etaFinal.split(",").filter(Boolean));
-    const dateFrom = params.get("date_from");
-    if (dateFrom) setFilterDateFrom(dateFrom);
-    const dateTo = params.get("date_to");
-    if (dateTo) setFilterDateTo(dateTo);
+    const yearParam = params.get("year");
+    if (yearParam) {
+      const years = yearParam.split(",").filter(Boolean);
+      setSelectedYears(years);
+      if (years.length === 0) {
+        setFilterDateFrom("");
+        setFilterDateTo("");
+      } else {
+        const sorted = years.sort();
+        setFilterDateFrom(`${sorted[0]}-01-01`);
+        setFilterDateTo(`${sorted[sorted.length - 1]}-12-31`);
+      }
+    } else {
+      const dateFrom = params.get("date_from");
+      if (dateFrom) setFilterDateFrom(dateFrom);
+      const dateTo = params.get("date_to");
+      if (dateTo) setFilterDateTo(dateTo);
+    }
     setFiltersReady(true);
   }, []);
 
@@ -559,11 +649,12 @@ export default function ContractsPage() {
     if (filterPort.length) params.set("port", filterPort.join(","));
     if (filterBlReleased.length) params.set("bl_released", filterBlReleased.join(","));
     if (filterEtaFinal.length) params.set("eta_final", filterEtaFinal.join(","));
+    if (selectedYears.length > 0 && !(selectedYears.length === 1 && selectedYears[0] === String(new Date().getFullYear()))) params.set("year", selectedYears.join(","));
     if (filterDateFrom) params.set("date_from", filterDateFrom);
     if (filterDateTo) params.set("date_to", filterDateTo);
     const qs = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
-  }, [filtersReady, debouncedSearch, filterCommercial, filterClient, filterStatus, filterIncoterm, filterProductType, filterVessel, filterPort, filterBlReleased, filterEtaFinal, filterBalancePaid, filterDateFrom, filterDateTo]);
+  }, [filtersReady, debouncedSearch, filterCommercial, filterClient, filterStatus, filterIncoterm, filterProductType, filterVessel, filterPort, filterBlReleased, filterEtaFinal, filterBalancePaid, filterDateFrom, filterDateTo, selectedYears]);
 
   // =====================================================
   // Debounce Search
@@ -778,6 +869,25 @@ export default function ContractsPage() {
     fetchSummaryCounts();
   }, [filtersReady, fetchSummaryCounts]);
 
+  // Auto-open contract from URL param ?open=<id>
+  const openContractHandled = useRef(false);
+  useEffect(() => {
+    if (openContractHandled.current || loading) return;
+    const openId = new URLSearchParams(window.location.search).get("open");
+    if (!openId) return;
+    openContractHandled.current = true;
+    const found = contracts.find((c) => c.id === openId);
+    if (found) {
+      handleViewContract(found);
+    } else {
+      fetch(`/api/contracts?id=${openId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((contract) => { if (contract) handleViewContract(contract); })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, contracts]);
+
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
@@ -813,13 +923,78 @@ export default function ContractsPage() {
   const popoverFilterCount = [
     filterCommercial, filterClient, filterStatus, filterIncoterm,
     filterProductType, filterVessel, filterPort, filterBlReleased, filterBalancePaid, filterEtaFinal,
+    filterDocsSent, filterDocsPending,
   ].filter((arr) => arr.length > 0).length;
+
+  // Date filters set by the year selector don't count as "active manual filters"
+  const isYearDateFilter = selectedYears.length > 0
+    ? filterDateFrom === `${selectedYears.sort()[0]}-01-01` && filterDateTo === `${selectedYears.sort()[selectedYears.length - 1]}-12-31`
+    : filterDateFrom === "" && filterDateTo === "";
+  const hasManualDateFilter = !isYearDateFilter && (filterDateFrom !== "" || filterDateTo !== "");
 
   const hasActiveFilters =
     searchQuery !== "" ||
     popoverFilterCount > 0 ||
-    filterDateFrom !== "" ||
-    filterDateTo !== "";
+    hasManualDateFilter;
+
+  // Client-side filter for documents (sent/pending are free-text, not API-filterable)
+  const displayedContracts = useMemo(() => {
+    let result = contracts;
+    if (filterDocsSent.length > 0) {
+      result = result.filter((c) => {
+        const sentList = normalizeDocsSent(c.documents_sent);
+        return filterDocsSent.every((doc) => sentList.includes(doc));
+      });
+    }
+    if (filterDocsPending.length > 0) {
+      result = result.filter((c) => {
+        const pending = c.documents_pending || "";
+        if (filterDocsPending.includes("TODOS_ENVIADOS")) {
+          if (pending === "Todos enviados") return true;
+        }
+        const pendingDocs = filterDocsPending.filter((d) => d !== "TODOS_ENVIADOS");
+        if (pendingDocs.length === 0) return pending === "Todos enviados";
+        return pendingDocs.some((doc) => pending.includes(doc));
+      });
+    }
+    return result;
+  }, [contracts, filterDocsSent, filterDocsPending]);
+
+  // Close year dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) {
+        setYearDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggleYear = (year: string) => {
+    setSelectedYears((prev) => {
+      let next: string[];
+      if (year === "all") {
+        next = [];
+      } else if (prev.includes(year)) {
+        next = prev.filter((y) => y !== year);
+      } else {
+        next = [...prev, year];
+      }
+      // Update date filters based on selection
+      if (next.length === 0) {
+        setFilterDateFrom("");
+        setFilterDateTo("");
+      } else {
+        const sorted = next.sort();
+        setFilterDateFrom(`${sorted[0]}-01-01`);
+        setFilterDateTo(`${sorted[sorted.length - 1]}-12-31`);
+      }
+      return next;
+    });
+  };
+
+  const yearLabel = selectedYears.length === 0 ? "Todos" : selectedYears.sort().join(", ");
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -832,11 +1007,19 @@ export default function ContractsPage() {
     setFilterVessel([]);
     setFilterPort([]);
     setFilterBlReleased([]);
+    setFilterDocsSent([]);
+    setFilterDocsPending([]);
     setFilterEtaFinal([]);
     setFilterBalancePaid([]);
     setEtaTreeExpanded(new Set());
-    setFilterDateFrom("");
-    setFilterDateTo("");
+    if (selectedYears.length === 0) {
+      setFilterDateFrom("");
+      setFilterDateTo("");
+    } else {
+      const sorted = [...selectedYears].sort();
+      setFilterDateFrom(`${sorted[0]}-01-01`);
+      setFilterDateTo(`${sorted[sorted.length - 1]}-12-31`);
+    }
     setActiveFilterPanel(null);
     setFilterPanelSearch("");
   };
@@ -864,9 +1047,18 @@ export default function ContractsPage() {
   // =====================================================
   // Auto-calculation helpers
   // =====================================================
-  const addDaysToDate = (dateStr: string, days: number): string => {
+  // WORKDAY.INTL equivalent: add business days (Mon-Fri) then +10 calendar days
+  // Matches Excel formula: =DIA.LAB.INTL(advance_date, prod_days, 1) + 10
+  const calcExwDate = (dateStr: string, businessDays: number): string => {
     const d = new Date(dateStr + "T00:00:00");
-    d.setDate(d.getDate() + days);
+    let added = 0;
+    while (added < businessDays) {
+      d.setDate(d.getDate() + 1);
+      const dow = d.getDay(); // 0=Sun, 6=Sat
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    // +10 calendar days
+    d.setDate(d.getDate() + 10);
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
@@ -885,7 +1077,7 @@ export default function ContractsPage() {
     const advDate = data.advance_payment_date as string | null | undefined;
     const prodDays = data.production_time_days as number | null | undefined;
     if (advDate && prodDays && prodDays > 0) {
-      updates.exw_date = addDaysToDate(advDate, prodDays);
+      updates.exw_date = calcExwDate(advDate, prodDays);
       updates.advance_paid = "SI";
       // Auto-advance status from PENDIENTE ANTICIPO → EN PRODUCCIÓN
       if (data.status === "PENDIENTE ANTICIPO") {
@@ -948,7 +1140,13 @@ export default function ContractsPage() {
     // 7. Documents pending = ALL_DOCUMENTS - documents_sent
     const sentStr = data.documents_sent as string | null | undefined;
     if (sentStr !== undefined) {
-      const sentList = sentStr ? sentStr.split(", ").filter(Boolean) : [];
+      // Normalize abbreviations (INVOICE->Factura, PL->Lista de empaque, etc.)
+      const sentList = normalizeDocsSent(sentStr);
+      // If the raw value contained abbreviations, also update documents_sent to normalized form
+      const normalizedSentStr = sentList.length > 0 ? sentList.join(", ") : null;
+      if (normalizedSentStr && normalizedSentStr !== sentStr) {
+        updates.documents_sent = normalizedSentStr;
+      }
       // Determine applicable docs based on product type and incoterm
       const productType = (data.product_type as string) || "";
       const incoterm = (data.incoterm as string) || "";
@@ -1094,6 +1292,9 @@ export default function ContractsPage() {
   // Submit Handler (Create or Update)
   // =====================================================
   const handleSubmit = async () => {
+    // Prevent double-submit
+    if (submitting) return;
+
     // Basic validation
     if (!formData.commercial_name || formData.commercial_name.trim() === "") {
       toast.error("El nombre comercial es obligatorio");
@@ -1191,7 +1392,11 @@ export default function ContractsPage() {
     } catch (error) {
       console.error("Error saving contract:", error);
       toast.error(
-        editingContract ? "Error al actualizar el contrato" : "Error al crear el contrato"
+        error instanceof Error
+          ? error.message
+          : editingContract
+            ? "Error al actualizar el contrato"
+            : "Error al crear el contrato"
       );
     } finally {
       setSubmitting(false);
@@ -1228,11 +1433,42 @@ export default function ContractsPage() {
   };
 
   // =====================================================
+  // Delete Contract
+  // =====================================================
+  const handleDelete = async () => {
+    if (!contractToDelete?.id) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/contracts?id=${contractToDelete.id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Error al eliminar el contrato");
+      }
+
+      toast.success("Contrato eliminado exitosamente");
+      setDeleteDialogOpen(false);
+      setContractToDelete(null);
+      fetchContracts();
+      fetchSummaryCounts();
+    } catch (error) {
+      console.error("Error deleting contract:", error);
+      toast.error(error instanceof Error ? error.message : "Error al eliminar el contrato");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // =====================================================
   // Download Excel Report
   // =====================================================
   const [downloading, setDownloading] = useState(false);
+  const [excelColumnSelectorOpen, setExcelColumnSelectorOpen] = useState(false);
 
-  const handleDownloadExcel = async () => {
+  const handleDownloadExcel = async (selectedColumns?: PDFColumn[]) => {
     try {
       setDownloading(true);
       toast.info("Generando reporte Excel...");
@@ -1328,8 +1564,9 @@ export default function ContractsPage() {
         } catch { return ""; }
       };
 
-      // Column config (20 columns)
-      ws.columns = [
+      // Column config — filter by selection if provided
+      const selectedKeys = selectedColumns ? new Set(selectedColumns.map(c => c.dataKey)) : null;
+      const allExcelCols = [
         { key: "contract_date", width: 14 },
         { key: "china_contract", width: 22 },
         { key: "client_contract", width: 20 },
@@ -1351,6 +1588,12 @@ export default function ContractsPage() {
         { key: "pending_client_amount", width: 20 },
         { key: "notes", width: 32 },
       ];
+      // Map pending_amount → pending_client_amount for Excel (dataKey difference)
+      const keyMap: Record<string, string> = { pending_amount: "pending_client_amount" };
+      const filteredExcelCols = selectedKeys
+        ? allExcelCols.filter(c => selectedKeys.has(c.key) || selectedKeys.has(Object.entries(keyMap).find(([, v]) => v === c.key)?.[0] || ""))
+        : allExcelCols;
+      ws.columns = filteredExcelCols;
 
       const totalCols = ws.columns.length;
       const now = new Date();
@@ -1379,13 +1622,11 @@ export default function ContractsPage() {
       if (debouncedSearch) filterDesc.push(`Búsqueda: "${debouncedSearch}"`);
 
       const r1 = ws.addRow([""]);
-      ws.mergeCells(1, 1, 1, totalCols);
       const c1 = ws.getCell("A1");
       c1.value = { richText: [
         { text: "                              ", font: { name: FONT, size: 16, color: { argb: NAVY } } },
         { text: "REPORTE DE CONTRATOS", font: { name: FONT, size: 12, bold: true, color: { argb: WHITE } } },
         { text: `     ${dateStr}  ·  ${exportData.length} registros`, font: { name: FONT, size: 9, color: { argb: "D0DCE8" } } },
-        ...(filterDesc.length > 0 ? [{ text: `     ${filterDesc.join(" · ")}`, font: { name: FONT, size: 8, italic: true, color: { argb: "A8BED4" } } }] : []),
       ] };
       c1.alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       c1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
@@ -1401,7 +1642,6 @@ export default function ContractsPage() {
       // ROW 2: Spacer
       // ══════════════════════════════════════════════════════
       const r2 = ws.addRow([""]);
-      ws.mergeCells(2, 1, 2, totalCols);
       r2.height = 5;
       for (let col = 1; col <= totalCols; col++) {
         r2.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -1410,12 +1650,15 @@ export default function ContractsPage() {
       // ══════════════════════════════════════════════════════
       // ROW 3: Column Headers — elegant two-tone
       // ══════════════════════════════════════════════════════
-      const colHeaders = [
-        "FECHA", "CONTRATO CHINA", "CONTRATO CLIENTE", "COMERCIAL", "CLIENTE",
-        "PAÍS", "DETALLE DE PRODUCTO", "TONS ACORDADAS", "TONS EMBARCADAS", "INCOTERM",
-        "FECHA EXW", "ESTADO", "ETA FINAL", "MOTONAVE", "NÚMERO BL", "PUERTO LLEGADA",
-        "ANTICIPO", "SALDO", "VALOR PDTE. (USD)", "NOTAS",
-      ];
+      const allColHeaders: Record<string, string> = {
+        contract_date: "FECHA", china_contract: "CONTRATO CHINA", client_contract: "CONTRATO CLIENTE",
+        commercial_name: "COMERCIAL", client_name: "CLIENTE", country: "PAÍS",
+        detail: "DETALLE DE PRODUCTO", tons_agreed: "TONS ACORDADAS", tons_shipped: "TONS EMBARCADAS",
+        incoterm: "INCOTERM", exw_date: "FECHA EXW", status: "ESTADO", eta_final: "ETA FINAL",
+        vessel_name: "MOTONAVE", bl_number: "NÚMERO BL", arrival_port: "PUERTO LLEGADA",
+        advance_paid: "ANTICIPO", balance_paid: "SALDO", pending_client_amount: "VALOR PDTE. (USD)", notes: "NOTAS",
+      };
+      const colHeaders = filteredExcelCols.map(c => allColHeaders[c.key] || c.key);
       const headerDataRow = ws.addRow(colHeaders);
       headerDataRow.height = 32;
       headerDataRow.eachCell((cell, colNumber) => {
@@ -1434,34 +1677,54 @@ export default function ContractsPage() {
       });
 
       // ══════════════════════════════════════════════════════
+      // SORT by status priority: EN TRÁNSITO → EN PRODUCCIÓN → PENDIENTE ANTICIPO → rest
+      // ══════════════════════════════════════════════════════
+      const statusPriority: Record<string, number> = {
+        "EN TRÁNSITO": 0,
+        "EN PRODUCCIÓN": 1,
+        "PENDIENTE ANTICIPO": 2,
+        "ENTREGADO AL CLIENTE": 3,
+        "ANULADO": 4,
+      };
+      exportData.sort((a, b) => {
+        const pa = statusPriority[a.status || ""] ?? 99;
+        const pb = statusPriority[b.status || ""] ?? 99;
+        return pa - pb;
+      });
+
+      // ══════════════════════════════════════════════════════
       // DATA ROWS — refined design with subtle grouping
       // ══════════════════════════════════════════════════════
       const STRIPE_A = WHITE;
       const STRIPE_B = "F8F7F5";
 
+      // Map of all possible column values
+      const activeKeys = new Set(filteredExcelCols.map(c => c.key));
       exportData.forEach((c: Contract, idx: number) => {
-        const row = ws.addRow([
-          toDate(c.contract_date),       // col 1 - Date object
-          c.china_contract || "",
-          c.client_contract || "",
-          c.commercial_name || "",
-          c.client_name || "",
-          c.country || "",
-          c.detail || "",
-          c.tons_agreed ?? "",           // col 8 - number
-          c.tons_shipped ?? "",          // col 9 - number
-          c.incoterm || "",
-          toDate(c.exw_date),            // col 11 - Date object
-          c.status || "",
-          toDate(c.eta_final),           // col 13 - Date object
-          c.vessel_name || "",
-          c.bl_number || "",
-          c.arrival_port || "",
-          c.advance_paid || "",
-          c.balance_paid || "",
-          c.pending_client_amount ?? "", // col 19 - number (USD)
-          c.notes || "",
-        ]);
+        const allValues: Record<string, unknown> = {
+          contract_date: toDate(c.contract_date),
+          china_contract: c.china_contract || "",
+          client_contract: c.client_contract || "",
+          commercial_name: c.commercial_name || "",
+          client_name: c.client_name || "",
+          country: c.country || "",
+          detail: c.detail || "",
+          tons_agreed: c.tons_agreed ?? "",
+          tons_shipped: c.tons_shipped ?? "",
+          incoterm: c.incoterm || "",
+          exw_date: toDate(c.exw_date),
+          status: c.status || "",
+          eta_final: toDate(c.eta_final),
+          vessel_name: c.vessel_name || "",
+          bl_number: c.bl_number || "",
+          arrival_port: c.arrival_port || "",
+          advance_paid: c.advance_paid || "",
+          balance_paid: c.balance_paid || "",
+          pending_client_amount: c.pending_client_amount ?? "",
+          notes: c.notes || "",
+        };
+        const rowValues = filteredExcelCols.map(col => allValues[col.key] ?? "");
+        const row = ws.addRow(rowValues);
 
         const isEven = idx % 2 === 0;
         const rowBg = isEven ? STRIPE_A : STRIPE_B;
@@ -1479,25 +1742,30 @@ export default function ContractsPage() {
           if (colNumber === 1) cell.border = { ...cell.border, left: { style: "thin" as const, color: { argb: "D4D2CD" } } };
           if (colNumber === totalCols) cell.border = { ...cell.border, right: { style: "thin" as const, color: { argb: "D4D2CD" } } };
 
-          // ── Date columns: format as date ──
-          if ([1, 11, 13].includes(colNumber) && cell.value instanceof Date) {
+          // Key-based styling (works regardless of column order/filtering)
+          const colKey = filteredExcelCols[colNumber - 1]?.key;
+          const dateKeys = ["contract_date", "exw_date", "eta_final"];
+          const centerKeys = ["country", "incoterm", "advance_paid", "balance_paid"];
+          const tonsKeys = ["tons_agreed", "tons_shipped"];
+
+          // Date columns
+          if (dateKeys.includes(colKey) && cell.value instanceof Date) {
             cell.numFmt = "DD/MM/YYYY";
             cell.alignment = { horizontal: "center", vertical: "middle" };
-            cell.font = { name: FONT, size: 9.5, color: { argb: INK_SOFT } };
-          } else if ([1, 11, 13].includes(colNumber)) {
+          } else if (dateKeys.includes(colKey)) {
             cell.alignment = { horizontal: "center", vertical: "middle" };
           }
 
-          // ── Status column (col 12) — colored text, no background ──
-          if (colNumber === 12 && c.status) {
+          // Status column
+          if (colKey === "status" && c.status) {
             const st = statusStyles[c.status] || { bg: "F1F5F9", text: "64748B" };
             cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: st.bg } };
             cell.font = { name: FONT, size: 8.5, bold: true, color: { argb: st.text } };
             cell.alignment = { horizontal: "center", vertical: "middle" };
           }
 
-          // ── Balance paid column (col 18) ──
-          if (colNumber === 18 && c.balance_paid) {
+          // Balance paid column
+          if (colKey === "balance_paid" && c.balance_paid) {
             const bs = balanceStyles[c.balance_paid] || null;
             if (bs) {
               cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bs.bg } };
@@ -1506,29 +1774,32 @@ export default function ContractsPage() {
             }
           }
 
-          // ── USD currency column (col 19) ──
-          if (colNumber === 19) {
+          // USD currency column
+          if (colKey === "pending_client_amount") {
             if (typeof cell.value === "number") {
-              cell.numFmt = '[$$-409]#,##0.00';
+              cell.numFmt = '"USD "#,##0.00';
               cell.alignment = { horizontal: "right", vertical: "middle" };
-              if (cell.value > 0) {
-                cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: "B45309" } };
-              }
+              if (cell.value > 0) cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: "B45309" } };
             } else {
               cell.alignment = { horizontal: "right", vertical: "middle" };
             }
           }
 
-          // ── Tons columns (col 8, 9) ──
-          if ((colNumber === 8 || colNumber === 9) && typeof cell.value === "number") {
+          // Tons columns
+          if (tonsKeys.includes(colKey) && typeof cell.value === "number") {
             cell.numFmt = "#,##0.00";
             cell.alignment = { horizontal: "right", vertical: "middle" };
             cell.font = { name: FONT, size: 9.5, color: { argb: INK } };
           }
 
-          // ── Center columns: País=6, Incoterm=10, Anticipo=17 ──
-          if ([6, 10, 17].includes(colNumber)) {
+          // Center columns
+          if (centerKeys.includes(colKey)) {
             cell.alignment = { horizontal: "center", vertical: "middle" };
+          }
+
+          // Wrap text for detail and notes
+          if (colKey === "detail" || colKey === "notes") {
+            cell.alignment = { ...cell.alignment, wrapText: true };
           }
 
           // ── Contract numbers — navy bold ──
@@ -1563,18 +1834,34 @@ export default function ContractsPage() {
           bottom: { style: "medium" as const, color: { argb: NAVY } },
         };
       }
-      totalsRow.getCell(7).value = "TOTALES";
-      totalsRow.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
-      totalsRow.getCell(7).font = { name: FONT, size: 10, bold: true, color: { argb: WHITE } };
-      totalsRow.getCell(8).value = totalTonsAgreed;
-      totalsRow.getCell(8).numFmt = "#,##0.00";
-      totalsRow.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
-      totalsRow.getCell(9).value = totalTonsShipped;
-      totalsRow.getCell(9).numFmt = "#,##0.00";
-      totalsRow.getCell(9).alignment = { horizontal: "right", vertical: "middle" };
-      totalsRow.getCell(19).value = totalPendingAmount;
-      totalsRow.getCell(19).numFmt = '[$$-409]#,##0.00';
-      totalsRow.getCell(19).alignment = { horizontal: "right", vertical: "middle" };
+      // Find column positions dynamically based on filtered columns
+      const findCol = (key: string) => filteredExcelCols.findIndex(c => c.key === key) + 1;
+      const colTonsAgreed = findCol("tons_agreed");
+      const colTonsShipped = findCol("tons_shipped");
+      const colPending = findCol("pending_client_amount");
+
+      // Place "TOTALES" label in the column before the first total column
+      const firstTotalCol = [colTonsAgreed, colTonsShipped, colPending].filter(c => c > 0).sort((a, b) => a - b)[0];
+      const labelCol = firstTotalCol && firstTotalCol > 1 ? firstTotalCol - 1 : 1;
+      totalsRow.getCell(labelCol).value = "TOTALES";
+      totalsRow.getCell(labelCol).alignment = { horizontal: "right", vertical: "middle" };
+      totalsRow.getCell(labelCol).font = { name: FONT, size: 10, bold: true, color: { argb: WHITE } };
+
+      if (colTonsAgreed > 0) {
+        totalsRow.getCell(colTonsAgreed).value = totalTonsAgreed;
+        totalsRow.getCell(colTonsAgreed).numFmt = "#,##0.00";
+        totalsRow.getCell(colTonsAgreed).alignment = { horizontal: "right", vertical: "middle" };
+      }
+      if (colTonsShipped > 0) {
+        totalsRow.getCell(colTonsShipped).value = totalTonsShipped;
+        totalsRow.getCell(colTonsShipped).numFmt = "#,##0.00";
+        totalsRow.getCell(colTonsShipped).alignment = { horizontal: "right", vertical: "middle" };
+      }
+      if (colPending > 0) {
+        totalsRow.getCell(colPending).value = totalPendingAmount;
+        totalsRow.getCell(colPending).numFmt = '"USD "#,##0.00';
+        totalsRow.getCell(colPending).alignment = { horizontal: "right", vertical: "middle" };
+      }
       totalsRow.height = 28;
 
       // ══════════════════════════════════════════════════════
@@ -1588,7 +1875,6 @@ export default function ContractsPage() {
 
       const footerRowIdx = ws.rowCount + 1;
       const footerRow = ws.addRow([""]);
-      ws.mergeCells(footerRowIdx, 1, footerRowIdx, totalCols);
       const footerCell = ws.getCell(`A${footerRowIdx}`);
       footerCell.value = { richText: [
         { text: "IBC Core", font: { name: FONT, size: 8.5, bold: true, color: { argb: NAVY } } },
@@ -1641,8 +1927,33 @@ export default function ContractsPage() {
   // Download PDF Report (same filters as Excel)
   // =====================================================
   const [downloadingPDF, setDownloadingPDF] = useState(false);
+  const [columnSelectorOpen, setColumnSelectorOpen] = useState(false);
 
-  const handleDownloadPDF = async () => {
+  // All available PDF columns
+  const allPDFColumns: PDFColumn[] = [
+    { header: "FECHA", dataKey: "contract_date", width: 0.8, halign: "center" },
+    { header: "CONTRATO CHINA", dataKey: "china_contract", width: 1.2, bold: true, color: "#1E3A5F" },
+    { header: "CONTRATO CLIENTE", dataKey: "client_contract", width: 1.1, bold: true, color: "#1E3A5F" },
+    { header: "COMERCIAL", dataKey: "commercial_name", width: 1.1, bold: true },
+    { header: "CLIENTE", dataKey: "client_name", width: 1.4 },
+    { header: "PAÍS", dataKey: "country", width: 0.7, halign: "center" },
+    { header: "DETALLE", dataKey: "detail", width: 2 },
+    { header: "TONS ACORDADAS", dataKey: "tons_agreed", width: 0.9, halign: "right" },
+    { header: "TONS EMBARCADAS", dataKey: "tons_shipped", width: 0.9, halign: "right" },
+    { header: "INCOTERM", dataKey: "incoterm", width: 0.7, halign: "center" },
+    { header: "FECHA EXW", dataKey: "exw_date", width: 0.8, halign: "center" },
+    { header: "ESTADO", dataKey: "status", width: 1.2, halign: "center", bold: true },
+    { header: "ETA FINAL", dataKey: "eta_final", width: 0.8, halign: "center" },
+    { header: "MOTONAVE", dataKey: "vessel_name", width: 1 },
+    { header: "Nº BL", dataKey: "bl_number", width: 1 },
+    { header: "PUERTO", dataKey: "arrival_port", width: 0.9 },
+    { header: "ANTICIPO", dataKey: "advance_paid", width: 0.7, halign: "center" },
+    { header: "SALDO", dataKey: "balance_paid", width: 0.7, halign: "center" },
+    { header: "PDTE. (USD)", dataKey: "pending_amount", width: 1, halign: "right", bold: true, color: "#B45309" },
+    { header: "NOTAS", dataKey: "notes", width: 1.5 },
+  ];
+
+  const handleDownloadPDF = async (selectedColumns?: PDFColumn[]) => {
     try {
       setDownloadingPDF(true);
       toast.info("Generando reporte PDF...");
@@ -1697,9 +2008,7 @@ export default function ContractsPage() {
       if (filterDateFrom || filterDateTo) filterDesc.push(`Fecha: ${filterDateFrom || "..."} a ${filterDateTo || "..."}`);
       if (debouncedSearch) filterDesc.push(`Búsqueda: "${debouncedSearch}"`);
 
-      const subtitle = filterDesc.length > 0
-        ? `Filtros: ${filterDesc.join(" · ")}`
-        : "Todos los contratos";
+      // subtitle is intentionally not passed to the PDF — clean report without filters
 
       const fmtDate = (d: string | null | undefined) => {
         if (!d) return "—";
@@ -1734,36 +2043,22 @@ export default function ContractsPage() {
         notes: c.notes || "—",
       }));
 
+      const cols = selectedColumns || allPDFColumns;
+
+      // Show client name in header if only one client is filtered
+      const clientSubtitle = filterClient.length === 1 ? filterClient[0] : undefined;
+
       await generatePDFReport({
         title: "REPORTE DE CONTRATOS",
-        subtitle,
-        filename: "Contratos_IBC",
+        subtitle: clientSubtitle,
+        filename: clientSubtitle ? `Contratos_${clientSubtitle.replace(/\s+/g, "_")}` : "Contratos_IBC",
         orientation: "landscape",
         recordLabel: "contratos",
-        columns: [
-          { header: "FECHA", dataKey: "contract_date", width: 0.8, halign: "center" },
-          { header: "CONTRATO CHINA", dataKey: "china_contract", width: 1.2, bold: true, color: "#1E3A5F" },
-          { header: "CONTRATO CLIENTE", dataKey: "client_contract", width: 1.1, bold: true, color: "#1E3A5F" },
-          { header: "COMERCIAL", dataKey: "commercial_name", width: 1.1, bold: true },
-          { header: "CLIENTE", dataKey: "client_name", width: 1.4 },
-          { header: "PAÍS", dataKey: "country", width: 0.7, halign: "center" },
-          { header: "DETALLE", dataKey: "detail", width: 2 },
-          { header: "TONS ACORD.", dataKey: "tons_agreed", width: 0.9, halign: "right" },
-          { header: "TONS EMBAR.", dataKey: "tons_shipped", width: 0.9, halign: "right" },
-          { header: "INCOTERM", dataKey: "incoterm", width: 0.7, halign: "center" },
-          { header: "FECHA EXW", dataKey: "exw_date", width: 0.8, halign: "center" },
-          { header: "ESTADO", dataKey: "status", width: 1.2, halign: "center", bold: true },
-          { header: "ETA FINAL", dataKey: "eta_final", width: 0.8, halign: "center" },
-          { header: "MOTONAVE", dataKey: "vessel_name", width: 1 },
-          { header: "Nº BL", dataKey: "bl_number", width: 1 },
-          { header: "PUERTO", dataKey: "arrival_port", width: 0.9 },
-          { header: "ANTICIPO", dataKey: "advance_paid", width: 0.7, halign: "center" },
-          { header: "SALDO", dataKey: "balance_paid", width: 0.7, halign: "center" },
-          { header: "PDTE. (USD)", dataKey: "pending_amount", width: 1, halign: "right", bold: true, color: "#B45309" },
-          { header: "NOTAS", dataKey: "notes", width: 1.5 },
-        ],
+        columns: cols,
         data: pdfData,
       });
+
+      setColumnSelectorOpen(false);
 
       toast.success("Reporte PDF descargado exitosamente");
     } catch (error) {
@@ -1787,28 +2082,38 @@ export default function ContractsPage() {
   // Render
   // =====================================================
   return (
+    <div style={{
+      background: T.glassBg,
+      border: `1px solid ${T.glassBorder}`,
+      borderRadius: T.radius,
+      boxShadow: T.shadowGlass,
+      padding: 28,
+    }}>
     <div className="space-y-5">
       {/* Breadcrumb */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: "#9CA3B4" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: "#0B5394", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: T.inkLight }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: T.accent, fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
           <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           Inicio
         </Link>
-        <span style={{ color: "#C5CAD5" }}>/</span>
-        <span style={{ fontWeight: 600, color: "#6B7080" }}>Contratos</span>
+        <span style={{ color: T.borderLight }}>/</span>
+        <span style={{ fontWeight: 600, color: T.inkMuted }}>Contratos</span>
       </div>
 
       {/* Page Header */}
       <div style={{
-        position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        position: "relative", overflow: "visible", borderRadius: 14,
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: "0 4px 24px rgba(11,83,148,0.18)",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1830,12 +2135,75 @@ export default function ContractsPage() {
               </p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div ref={yearDropdownRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setYearDropdownOpen(!yearDropdownOpen)}
+                style={{
+                  padding: "6px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.25)",
+                  background: "rgba(255,255,255,0.12)", backdropFilter: "blur(8px)",
+                  color: "#fff", fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", outline: "none", display: "flex", alignItems: "center", gap: 6,
+                  minWidth: 80,
+                }}
+              >
+                {yearLabel}
+                <ChevronDown className="h-3.5 w-3.5" style={{ opacity: 0.7 }} />
+              </button>
+              {yearDropdownOpen && typeof document !== "undefined" && createPortal(
+                <>
+                  <div style={{ position: "fixed", inset: 0, zIndex: 99998 }} onMouseDown={() => setYearDropdownOpen(false)} />
+                  <div onMouseDown={(e) => e.stopPropagation()} style={{
+                    position: "fixed",
+                    top: (yearDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                    left: (yearDropdownRef.current?.getBoundingClientRect().left ?? 0),
+                    zIndex: 99999,
+                    background: T.surface, borderRadius: 10, border: `1px solid ${T.border}`,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
+                  }}>
+                    {[
+                      { value: "all", label: "Todos" },
+                      { value: "2026", label: "2026" },
+                      { value: "2025", label: "2025" },
+                      { value: "2024", label: "2024" },
+                    ].map((opt) => {
+                      const isAll = opt.value === "all";
+                      const isChecked = isAll ? selectedYears.length === 0 : selectedYears.includes(opt.value);
+                      return (
+                        <div
+                          key={opt.value}
+                          onClick={(e) => { e.stopPropagation(); toggleYear(opt.value); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, padding: "7px 10px",
+                            borderRadius: 6, cursor: "pointer",
+                            background: isChecked ? T.accentLight : "transparent",
+                            transition: "background 0.15s",
+                          }}
+                          onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = T.surfaceHover; }}
+                          onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <div style={{
+                            width: 16, height: 16, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isChecked ? T.accent : T.surface,
+                            border: `1.5px solid ${isChecked ? T.accent : T.border}`,
+                          }}>
+                            {isChecked && <Check className="h-3 w-3" style={{ color: "#fff" }} />}
+                          </div>
+                          <span style={{ fontSize: 13, fontWeight: isChecked ? 600 : 400, color: isChecked ? T.accent : T.ink }}>{opt.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
+            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.2)" }} />
             <button
-              onClick={handleDownloadPDF}
+              onClick={() => setColumnSelectorOpen(true)}
               disabled={downloadingPDF}
               style={{
-                padding: "7px 14px", borderRadius: 8,
+                padding: "7px 14px", borderRadius: T.radiusSm,
                 border: "1px solid rgba(255,255,255,0.2)",
                 background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)",
                 color: "#fff", fontWeight: 600, fontSize: 12,
@@ -1855,10 +2223,10 @@ export default function ContractsPage() {
               Descargar PDF
             </button>
             <button
-              onClick={handleDownloadExcel}
+              onClick={() => setExcelColumnSelectorOpen(true)}
               disabled={downloading}
               style={{
-                padding: "7px 14px", borderRadius: 8,
+                padding: "7px 14px", borderRadius: T.radiusSm,
                 border: "1px solid rgba(255,255,255,0.2)",
                 background: "rgba(255,255,255,0.1)", backdropFilter: "blur(8px)",
                 color: "#fff", fontWeight: 600, fontSize: 12,
@@ -1880,15 +2248,15 @@ export default function ContractsPage() {
             <button
               onClick={handleNewContract}
               style={{
-                padding: "7px 16px", borderRadius: 8, border: "none",
-                background: "#fff", color: "#1E3A5F", fontWeight: 700, fontSize: 12,
+                padding: "7px 16px", borderRadius: T.radiusSm, border: "none",
+                background: "#fff", color: T.accent, fontWeight: 700, fontSize: 12,
                 cursor: "pointer", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
                 display: "flex", alignItems: "center", gap: 5,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                boxShadow: T.shadowMd,
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(11,83,148,0.15)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowMd; }}
             >
               <Plus className="h-4 w-4" />
               Nuevo Contrato
@@ -1943,11 +2311,11 @@ export default function ContractsPage() {
                   style={{
                     position: "relative", overflow: "hidden",
                     borderRadius: 14, padding: "12px 14px",
-                    background: "#FFFFFF",
-                    border: isActive ? `2px solid ${kpi.color}40` : "1px solid #F0EDE8",
+                    background: T.glassBg,
+                    border: isActive ? `2px solid ${kpi.color}40` : `1px solid ${T.glassBorder}`,
                     boxShadow: isActive
-                      ? `0 4px 16px ${kpi.color}18, 0 1px 3px rgba(26,29,35,0.04)`
-                      : "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)",
+                      ? `0 4px 16px ${kpi.color}18, 0 1px 3px rgba(11,83,148,0.04)`
+                      : T.shadowGlass,
                     transform: isActive ? "translateY(-2px)" : "translateY(0)",
                   }}
                 >
@@ -1963,8 +2331,8 @@ export default function ContractsPage() {
                       <kpi.icon className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <p style={{ fontSize: 9.5, fontWeight: 700, color: "#9CA3B4", letterSpacing: "0.05em", textTransform: "uppercase", lineHeight: 1.2, marginBottom: 2 }}>{kpi.label}</p>
-                      <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: "#18191D" }}>
+                      <p style={{ fontSize: 9.5, fontWeight: 700, color: T.inkMuted, letterSpacing: "0.05em", textTransform: "uppercase", lineHeight: 1.2, marginBottom: 2 }}>{kpi.label}</p>
+                      <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1, color: T.ink }}>
                         {formatNumber(kpi.value)}
                       </p>
                     </div>
@@ -1977,7 +2345,7 @@ export default function ContractsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2.5 items-center p-3" style={{ borderRadius: 14, background: "#FFFFFF", border: "1px solid #F0EDE8", boxShadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)" }}>
+      <div className="flex flex-wrap gap-2.5 items-center p-3" style={{ borderRadius: 14, background: T.glassBg, border: `1px solid ${T.glassBorder}`, boxShadow: T.shadowGlass }}>
         <div className="relative flex-1 min-w-[200px] max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
@@ -2048,6 +2416,8 @@ export default function ContractsPage() {
                     { key: "vessel", label: "Motonave", selected: filterVessel, icon: Ship },
                     { key: "port", label: "Puerto de Llegada", selected: filterPort, icon: MapPin },
                     { key: "bl_released", label: "BL Liberado", selected: filterBlReleased, icon: FileCheck },
+                    { key: "docs_sent", label: "Docs Enviados", selected: filterDocsSent, icon: FileText },
+                    { key: "docs_pending", label: "Docs Pendientes", selected: filterDocsPending, icon: Clock },
                   ].map((cat) => (
                     <button
                       key={cat.key}
@@ -2317,6 +2687,21 @@ export default function ContractsPage() {
                       selected: filterBlReleased,
                       setter: setFilterBlReleased,
                     },
+                    docs_sent: {
+                      label: "Docs Enviados",
+                      options: ALL_DOCUMENTS.map((d) => ({ value: d.key, label: d.label })),
+                      selected: filterDocsSent,
+                      setter: setFilterDocsSent,
+                    },
+                    docs_pending: {
+                      label: "Docs Pendientes",
+                      options: [
+                        { value: "TODOS_ENVIADOS", label: "Todos enviados (completo)" },
+                        ...ALL_DOCUMENTS.map((d) => ({ value: d.label, label: d.label })),
+                      ],
+                      selected: filterDocsPending,
+                      setter: setFilterDocsPending,
+                    },
                   };
 
                   const config = panelConfig[activeFilterPanel];
@@ -2446,24 +2831,24 @@ export default function ContractsPage() {
       </div>
 
       {/* Data Table */}
-      <div className="overflow-hidden" style={{ background: "#FFFFFF", borderRadius: 14, border: "1px solid #F0EDE8", boxShadow: "0 1px 2px rgba(26,29,35,0.03), 0 2px 8px rgba(26,29,35,0.04)" }}>
+      <div className="overflow-hidden" style={{ background: T.glassBg, borderRadius: T.radius, border: `1px solid ${T.glassBorder}`, boxShadow: T.shadowGlass }}>
         {loading ? (
           <div className="p-4">
             <TableSkeleton />
           </div>
-        ) : contracts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-100 to-slate-50 mb-5 shadow-inner">
-              <FileText className="h-8 w-8 text-slate-300" />
+        ) : displayedContracts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20" style={{ color: T.inkMuted }}>
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl mb-5" style={{ background: "rgba(11,83,148,0.04)", boxShadow: "inset 0 2px 4px rgba(11,83,148,0.06)" }}>
+              <FileText className="h-8 w-8" style={{ color: T.borderLight }} />
             </div>
-            <p className="text-lg font-semibold text-slate-600">No se encontraron contratos</p>
-            <p className="text-sm mt-1.5 text-slate-400">
+            <p className="text-lg font-semibold" style={{ color: T.inkSoft }}>No se encontraron contratos</p>
+            <p className="text-sm mt-1.5" style={{ color: T.inkLight }}>
               {hasActiveFilters
                 ? "Intenta ajustar los filtros de búsqueda"
                 : "Crea tu primer contrato para comenzar"}
             </p>
             {!hasActiveFilters && (
-              <Button onClick={handleNewContract} className="mt-4 rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 text-white shadow-md shadow-blue-500/20 hover:shadow-lg transition-all">
+              <Button onClick={handleNewContract} className="mt-4 text-white hover:shadow-lg transition-all" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, borderRadius: T.radiusMd }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Nuevo Contrato
               </Button>
@@ -2473,7 +2858,7 @@ export default function ContractsPage() {
           <>
             <Table className="table-fixed w-full">
               <TableHeader>
-                <TableRow className="border-b" style={{ background: "#FAF9F7", borderColor: "#E8E6E1" }}>
+                <TableRow className="border-b" style={{ background: "rgba(11,83,148,0.03)", borderColor: T.borderLight }}>
                   {/* Fecha */}
                   <TableHead className={cn("px-2 py-2", isSaldosView ? "w-[7%]" : "w-[8%]")}>
                     <SortableHeader
@@ -2593,16 +2978,16 @@ export default function ContractsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {contracts.map((contract, idx) => (
+                {displayedContracts.map((contract, idx) => (
                   <TableRow
                     key={contract.id}
                     className="cursor-pointer transition-all duration-150 group/row"
                     style={{
-                      background: idx % 2 === 1 ? "#FAF9F7" : "#FFFFFF",
-                      borderBottom: "1px solid #F0EDE8",
+                      background: idx % 2 === 1 ? "rgba(11,83,148,0.015)" : "transparent",
+                      borderBottom: `1px solid ${T.borderLight}`,
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "#F5F3EF"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = idx % 2 === 1 ? "#FAF9F7" : "#FFFFFF"; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(11,83,148,0.03)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = idx % 2 === 1 ? "rgba(11,83,148,0.015)" : "transparent"; }}
                     onClick={() => handleViewContract(contract)}
                   >
                     {/* Fecha */}
@@ -2719,6 +3104,19 @@ export default function ContractsPage() {
                               Anular
                             </DropdownMenuItem>
                           )}
+                          {authProfile?.role === "admin" || authProfile?.role === "directora" ? (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setContractToDelete(contract);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          ) : null}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -2728,10 +3126,13 @@ export default function ContractsPage() {
             </Table>
 
             {/* Pagination */}
-            <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-4 gap-3" style={{ borderTop: "1px solid #E8E6E1", background: "#FAF9F7" }}>
+            <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-4 gap-3" style={{ borderTop: `1px solid ${T.borderLight}`, background: "rgba(11,83,148,0.015)" }}>
               <div className="flex items-center gap-4">
-                <p className="text-sm text-slate-500">
-                  Mostrando <span className="font-semibold text-slate-700">{rangeStart}–{rangeEnd}</span> de <span className="font-semibold text-slate-700">{totalCount}</span>
+                <p className="text-sm" style={{ color: T.inkLight }}>
+                  Mostrando <span className="font-semibold" style={{ color: T.inkSoft }}>{rangeStart}–{rangeEnd}</span> de <span className="font-semibold" style={{ color: T.inkSoft }}>{totalCount}</span>
+                  {(filterDocsSent.length > 0 || filterDocsPending.length > 0) && displayedContracts.length !== contracts.length && (
+                    <span className="text-xs text-amber-600 ml-1">({displayedContracts.length} filtrados)</span>
+                  )}
                 </p>
                 <Select
                   value={String(pageSize)}
@@ -2803,71 +3204,110 @@ export default function ContractsPage() {
         )}
       </div>
 
-      {/* =====================================================
-          Contract Detail / Edit / Create Sheet
-          ===================================================== */}
-      {/* Contract Modal (glassmorphism) */}
-      {sheetOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop */}
+    </div>
+
+      {/* Contract Modal — via portal to escape backdrop-filter containing block */}
+      {sheetOpen && createPortal(
+        <div
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          {/* Backdrop — cinematic dark blur */}
           <div
-            className="absolute inset-0 bg-slate-900/50 backdrop-blur-md transition-opacity duration-300"
+            style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(135deg, rgba(13,27,42,0.55), rgba(11,83,148,0.15))",
+              backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+            }}
             onClick={() => setSheetOpen(false)}
           />
           {/* Modal Card */}
-          <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl border border-white/30 bg-white/85 backdrop-blur-2xl shadow-[0_32px_64px_-12px_rgba(0,0,0,0.25)] animate-in fade-in zoom-in-95 duration-300">
-            {/* Gradient accent bar */}
-            <div className="absolute top-0 left-0 right-0 h-1 rounded-t-3xl bg-gradient-to-r from-[#1E3A5F] via-blue-500 to-cyan-400" />
+          <div
+            className="animate-in fade-in zoom-in-95 duration-300"
+            style={{
+              position: "relative",
+              width: "100%", maxWidth: 580,
+              maxHeight: "82vh",
+              display: "flex", flexDirection: "column",
+              borderRadius: 20,
+              border: "1px solid rgba(255,255,255,0.6)",
+              background: "rgba(255,255,255,0.97)",
+              boxShadow: "0 32px 80px -16px rgba(11,83,148,0.30), 0 0 0 1px rgba(11,83,148,0.05), 0 0 120px -40px rgba(11,83,148,0.08)",
+              overflow: "hidden",
+            }}
+          >
+            {/* Gradient accent bar — premium double line */}
+            <div style={{ height: 3, background: T.gradientMixed }} />
 
-            {/* Header */}
-            <div className="relative px-7 pt-6 pb-4">
+            {/* Header — elevated with subtle bg */}
+            <div style={{ position: "relative", padding: "16px 20px 14px", background: "linear-gradient(180deg, rgba(11,83,148,0.025) 0%, transparent 100%)" }}>
               {/* Close button */}
               <button
                 onClick={() => setSheetOpen(false)}
-                className="absolute top-4 right-4 rounded-full p-2 bg-slate-100/80 hover:bg-red-50 hover:text-red-500 text-slate-400 transition-all duration-200 hover:scale-110 hover:rotate-90"
+                style={{
+                  position: "absolute", top: 12, right: 12,
+                  width: 28, height: 28, borderRadius: 8,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "rgba(11,83,148,0.04)", border: "1px solid rgba(11,83,148,0.06)",
+                  color: T.inkLight, cursor: "pointer", transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.borderColor = "rgba(220,38,38,0.15)"; e.currentTarget.style.color = "#DC2626"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(11,83,148,0.04)"; e.currentTarget.style.borderColor = "rgba(11,83,148,0.06)"; e.currentTarget.style.color = T.inkLight; }}
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5" />
               </button>
 
               {viewMode && editingContract ? (
-                <div className="flex items-start gap-4">
-                  {/* Contract icon */}
-                  <div className="flex-shrink-0 h-12 w-12 rounded-2xl bg-gradient-to-br from-[#1E3A5F] to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                    <FileText className="h-6 w-6 text-white" />
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                    background: T.gradientPrimary,
+                    boxShadow: `0 4px 12px rgba(11,83,148,0.25)`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <FileText className="h-[18px] w-[18px] text-white" />
                   </div>
-                  <div className="flex-1 min-w-0 pr-8">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                        {formData.china_contract || formData.client_contract || "Sin número"}
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: 32 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <h2 style={{ fontSize: 17, fontWeight: 700, color: T.ink, letterSpacing: "-0.3px" }}>
+                        {formData.client_contract || formData.china_contract || "Sin número"}
+                        {formData.client_name && <span style={{ fontWeight: 400, color: T.inkMuted, fontSize: 14 }}> — {formData.client_name}</span>}
                       </h2>
                       <StatusBadge status={formData.status as ContractStatus} />
                     </div>
-                    <div className="flex items-center gap-2 mt-1.5 text-sm text-slate-500">
-                      <User className="h-3.5 w-3.5" />
-                      <span>{formData.commercial_name || "—"}</span>
-                      <span className="text-slate-300">|</span>
-                      <Building2 className="h-3.5 w-3.5" />
-                      <span>{formData.client_name || "—"}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 12, color: T.inkMuted }}>
+                      <User style={{ width: 12, height: 12 }} />
+                      <span style={{ fontWeight: 500 }}>{formData.commercial_name || "—"}</span>
+                      <span style={{ width: 3, height: 3, borderRadius: "50%", background: T.border, display: "inline-block" }} />
+                      <Building2 style={{ width: 12, height: 12 }} />
+                      <span style={{ fontWeight: 500 }}>{formData.client_name || "—"}</span>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 pr-8">
-                  <div className={cn(
-                    "flex-shrink-0 h-10 w-10 rounded-xl flex items-center justify-center shadow-md",
-                    editingContract
-                      ? "bg-gradient-to-br from-amber-500 to-orange-500 shadow-amber-500/20"
-                      : "bg-gradient-to-br from-emerald-500 to-green-600 shadow-emerald-500/20"
-                  )}>
-                    {editingContract ? <Pencil className="h-5 w-5 text-white" /> : <Plus className="h-5 w-5 text-white" />}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, paddingRight: 32 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                    background: editingContract
+                      ? "linear-gradient(135deg, #F59E0B, #F97316)"
+                      : "linear-gradient(135deg, #16A34A, #0EA5A5)",
+                    boxShadow: editingContract
+                      ? "0 4px 12px rgba(245,158,11,0.25)"
+                      : "0 4px 12px rgba(22,163,74,0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {editingContract ? <Pencil className="h-[18px] w-[18px] text-white" /> : <Plus className="h-[18px] w-[18px] text-white" />}
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                    <h2 style={{ fontSize: 17, fontWeight: 700, color: T.ink, letterSpacing: "-0.3px" }}>
                       {editingContract ? "Editar Contrato" : "Nuevo Contrato"}
                     </h2>
-                    <p className="text-sm text-slate-500">
+                    <p style={{ fontSize: 12, color: T.inkMuted, marginTop: 2 }}>
                       {editingContract
-                        ? `Modificando ${formData.china_contract || formData.client_contract || "contrato"}`
+                        ? `Modificando ${formData.client_contract || formData.china_contract || "contrato"}`
                         : "Completa los datos para registrar un nuevo contrato"}
                     </p>
                   </div>
@@ -2875,54 +3315,54 @@ export default function ContractsPage() {
               )}
             </div>
 
-            {/* Divider with glow */}
-            <div className="mx-7 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+            {/* Divider — gradient fade */}
+            <div style={{ margin: "0 20px", height: 1, background: `linear-gradient(90deg, transparent, ${T.border}, transparent)` }} />
 
             <div className="flex-1 overflow-y-auto">
-            <div className="px-7 pb-6">
-              <Tabs defaultValue="general" className="mt-5">
-                <TabsList className="w-full grid grid-cols-4 mb-5 h-11 bg-slate-100/80 rounded-xl p-1 gap-1">
-                  <TabsTrigger value="general" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
-                    <FileText className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">General</span>
+            <div style={{ padding: "12px 20px 16px" }}>
+              <Tabs defaultValue="general" className="mt-1">
+                <TabsList className="w-full grid grid-cols-4 mb-4 p-1 gap-1" style={{ height: 38, borderRadius: 10, background: "rgba(11,83,148,0.04)", border: "1px solid rgba(11,83,148,0.04)" }}>
+                  <TabsTrigger value="general" className="gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200" style={{ fontSize: 11.5, color: T.inkMuted }}>
+                    <FileText style={{ width: 13, height: 13 }} />
+                    General
                   </TabsTrigger>
-                  <TabsTrigger value="dates" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
-                    <CalendarIcon className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Fechas</span>
+                  <TabsTrigger value="dates" className="gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200" style={{ fontSize: 11.5, color: T.inkMuted }}>
+                    <CalendarIcon style={{ width: 13, height: 13 }} />
+                    Fechas
                   </TabsTrigger>
-                  <TabsTrigger value="shipping" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
-                    <Ship className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Embarque</span>
+                  <TabsTrigger value="shipping" className="gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200" style={{ fontSize: 11.5, color: T.inkMuted }}>
+                    <Ship style={{ width: 13, height: 13 }} />
+                    Embarque
                   </TabsTrigger>
-                  <TabsTrigger value="docs" className="text-xs gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-[#1E3A5F] transition-all duration-200">
-                    <CreditCard className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Docs/Pagos</span>
+                  <TabsTrigger value="docs" className="gap-1.5 rounded-lg font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm transition-all duration-200" style={{ fontSize: 11.5, color: T.inkMuted }}>
+                    <CreditCard style={{ width: 13, height: 13 }} />
+                    Docs/Pagos
                   </TabsTrigger>
                 </TabsList>
 
                 {/* ---- Tab: General ---- */}
-                <TabsContent value="general" className="space-y-5">
+                <TabsContent value="general" className="space-y-3">
                   {viewMode ? (
-                    <div className="space-y-5">
+                    <div className="space-y-3">
                       {/* Section: Personas */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-blue-500 to-blue-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Personas</h4>
+                      <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: T.borderLight, background: "rgba(11,83,148,0.02)" }}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-5 w-[3px] rounded-full" style={{ background: T.gradientPrimary }} />
+                          <h4 style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: T.inkMuted }}>Personas</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Comercial" value={formData.commercial_name} icon={User} accent="blue" />
                           <ReadOnlyField label="Cliente" value={formData.client_name} icon={Building2} accent="blue" />
                         </div>
                       </div>
 
                       {/* Section: Contratos */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-violet-500 to-violet-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Contratos</h4>
+                      <div className="rounded-xl border p-3 space-y-2" style={{ borderColor: T.borderLight, background: "rgba(11,83,148,0.02)" }}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-5 w-[3px] rounded-full bg-gradient-to-b from-violet-500 to-violet-600" />
+                          <h4 style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: T.inkMuted }}>Contratos</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <div className="relative group/copy">
                             <ReadOnlyField label="Contrato Cliente" value={formData.client_contract} icon={Hash} accent="violet" />
                             {formData.client_contract && (
@@ -2948,40 +3388,40 @@ export default function ContractsPage() {
                             )}
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Fecha Contrato" value={formatDate(formData.contract_date)} icon={CalendarIcon} accent="violet" />
                           <ReadOnlyField label="Mes Emisión" value={formData.issue_month} icon={CalendarIcon} accent="violet" />
                         </div>
                       </div>
 
                       {/* Section: Producto */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Producto y Logística</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Producto y Logística</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="País" value={formData.country} icon={Globe} accent="emerald" />
                           <ReadOnlyField label="Incoterm" value={formData.incoterm} icon={Scale} accent="emerald" />
                         </div>
                         <ReadOnlyField label="Detalle" value={formData.detail} icon={Info} accent="emerald" />
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Tipo Producto" value={formData.product_type} icon={Package} accent="emerald" />
                           <ReadOnlyField label="Tons Acordadas" value={formatNumber(formData.tons_agreed)} icon={Weight} accent="emerald" />
                         </div>
                       </div>
 
                       {/* Section: Pagos y Estado */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-amber-500 to-amber-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Pagos y Estado</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-amber-500 to-amber-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Pagos y Estado</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Anticipo Pagado" value={formData.advance_paid} icon={CreditCard} accent="amber" />
                           <ReadOnlyField label="Saldo Pagado" value={formData.balance_paid} icon={DollarSign} accent="amber" />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <div className="group relative rounded-xl px-3.5 py-2.5 bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-200/40 transition-all duration-200 hover:shadow-sm hover:scale-[1.01]">
                             <div className="flex items-center gap-1.5 mb-1.5">
                               <ClipboardCheck className="h-3 w-3 text-amber-500/70" />
@@ -3529,20 +3969,20 @@ export default function ContractsPage() {
                 </TabsContent>
 
                 {/* ---- Tab: Fechas y Tiempos ---- */}
-                <TabsContent value="dates" className="space-y-5">
+                <TabsContent value="dates" className="space-y-3">
                   {viewMode ? (
                     <div className="space-y-5">
                       {/* Section: Producción */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-amber-500 to-amber-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Producción</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-amber-500 to-amber-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Producción</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Tiempo Producción (días)" value={formData.production_time_days} icon={Clock} accent="amber" />
                           <ReadOnlyField label="Fecha Pago Anticipo" value={formatDate(formData.advance_payment_date)} icon={CreditCard} accent="amber" />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Fecha Entrega PCC" value={formatDate(formData.delivery_date_pcc)} icon={CalendarIcon} accent="amber" />
                           <ReadOnlyField label="Fecha EXW" value={formatDate(formData.exw_date)} icon={CalendarIcon} accent="amber" />
                         </div>
@@ -3550,28 +3990,28 @@ export default function ContractsPage() {
                       </div>
 
                       {/* Section: Tránsito */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-blue-500 to-blue-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Tránsito y Llegada</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-blue-500 to-blue-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Tránsito y Llegada</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="ETD" value={formatDate(formData.etd)} icon={Ship} accent="blue" />
                           <ReadOnlyField label="ETA Inicial" value={formatDate(formData.eta_initial)} icon={CalendarIcon} accent="blue" />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="ETA Final" value={formatDate(formData.eta_final)} icon={CalendarIcon} accent="blue" />
                           <ReadOnlyField label="Diferencia Días" value={formData.days_difference} icon={Clock} accent="blue" />
                         </div>
                       </div>
 
                       {/* Section: Entrega */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Entrega</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Entrega</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Mes Entrega" value={formData.delivery_month} icon={CalendarIcon} accent="emerald" />
                           <ReadOnlyField label="Año Entrega" value={formData.delivery_year} icon={CalendarIcon} accent="emerald" />
                         </div>
@@ -3700,20 +4140,20 @@ export default function ContractsPage() {
                 </TabsContent>
 
                 {/* ---- Tab: Embarque ---- */}
-                <TabsContent value="shipping" className="space-y-5">
+                <TabsContent value="shipping" className="space-y-3">
                   {viewMode ? (
                     <div className="space-y-5">
                       {/* Section: Navío */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-blue-500 to-blue-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Navío y Ruta</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-blue-500 to-blue-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Navío y Ruta</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Motonave" value={formData.vessel_name} icon={Ship} accent="blue" />
                           <ReadOnlyField label="Naviera" value={formData.shipping_company} icon={Anchor} accent="blue" />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Número BL" value={formData.bl_number} icon={FileText} accent="blue" />
                           <ReadOnlyField label="Puerto Llegada" value={formData.arrival_port} icon={MapPin} accent="blue" />
                         </div>
@@ -3721,10 +4161,10 @@ export default function ContractsPage() {
                       </div>
 
                       {/* Section: Tonelaje */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-violet-500 to-violet-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Tonelaje</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-violet-500 to-violet-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Tonelaje</h4>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <ReadOnlyField label="Tons Embarcadas" value={formatNumber(formData.tons_shipped)} icon={Weight} accent="violet" />
@@ -3834,16 +4274,16 @@ export default function ContractsPage() {
                 </TabsContent>
 
                 {/* ---- Tab: Documentos y Pagos ---- */}
-                <TabsContent value="docs" className="space-y-5">
+                <TabsContent value="docs" className="space-y-3">
                   {viewMode ? (
                     <div className="space-y-5">
                       {/* Section: Documentos */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Documentos</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Documentos</h4>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="BL Liberado" value={formData.bl_released} icon={FileCheck} accent="emerald" />
                           <div className="group relative rounded-xl px-3.5 py-2.5 bg-gradient-to-br from-emerald-500/5 to-emerald-500/10 border border-emerald-100/50">
                             <div className="flex items-center gap-1.5 mb-1.5">
@@ -3851,7 +4291,7 @@ export default function ContractsPage() {
                               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Documentos Enviados</p>
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              {formData.documents_sent ? formData.documents_sent.split(", ").map((doc) => (
+                              {formData.documents_sent ? normalizeDocsSent(formData.documents_sent).map((doc) => (
                                 <span key={doc} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700">
                                   {doc}
                                 </span>
@@ -3880,10 +4320,10 @@ export default function ContractsPage() {
                       </div>
 
                       {/* Section: Pagos */}
-                      <div className="rounded-2xl border border-slate-100/80 bg-gradient-to-br from-white/60 to-slate-50/40 p-4 space-y-3">
+                      <div className="rounded-xl border border-[#EDEBE7] bg-[rgba(11,83,148,0.02)] p-3 space-y-2">
                         <div className="flex items-center gap-2 mb-1">
-                          <div className="h-6 w-1 rounded-full bg-gradient-to-b from-rose-500 to-rose-600" />
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Pagos</h4>
+                          <div className="h-4 w-[3px] rounded-full bg-gradient-to-b from-rose-500 to-rose-600" />
+                          <h4 className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Pagos</h4>
                         </div>
                         <ReadOnlyField
                           label="Monto Pendiente Cliente"
@@ -3917,7 +4357,7 @@ export default function ContractsPage() {
                               <Button variant="outline" className="w-full justify-between font-normal h-auto min-h-[36px] text-sm text-left py-2">
                                 <span className="truncate">
                                   {formData.documents_sent
-                                    ? `${formData.documents_sent.split(", ").length} documentos`
+                                    ? `${normalizeDocsSent(formData.documents_sent).length} documentos`
                                     : <span className="text-muted-foreground">Seleccionar documentos</span>}
                                 </span>
                                 <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
@@ -3926,7 +4366,7 @@ export default function ContractsPage() {
                             <PopoverContent className="w-[300px] p-0" align="start">
                               <div className="p-3 space-y-1 max-h-[300px] overflow-y-auto">
                                 {ALL_DOCUMENTS.map((doc) => {
-                                  const sentList = formData.documents_sent ? formData.documents_sent.split(", ").filter(Boolean) : [];
+                                  const sentList = normalizeDocsSent(formData.documents_sent);
                                   const isChecked = sentList.includes(doc.key);
                                   const productType = (formData.product_type as string) || "";
                                   const incoterm = (formData.incoterm as string) || "";
@@ -3948,11 +4388,12 @@ export default function ContractsPage() {
                                       <Checkbox
                                         checked={isChecked}
                                         onCheckedChange={(checked) => {
+                                          const currentNormalized = normalizeDocsSent(formData.documents_sent);
                                           let updated: string[];
                                           if (checked) {
-                                            updated = [...sentList, doc.key];
+                                            updated = [...currentNormalized, doc.key];
                                           } else {
-                                            updated = sentList.filter((s) => s !== doc.key);
+                                            updated = currentNormalized.filter((s) => s !== doc.key);
                                           }
                                           updateFormField("documents_sent", updated.length > 0 ? updated.join(", ") : "");
                                         }}
@@ -3975,7 +4416,7 @@ export default function ContractsPage() {
                               </div>
                               <div className="border-t border-slate-100 px-3 py-2 flex items-center justify-between">
                                 <span className="text-[10px] text-slate-400">
-                                  {formData.documents_sent ? formData.documents_sent.split(", ").length : 0} de {ALL_DOCUMENTS.filter((d) => {
+                                  {formData.documents_sent ? normalizeDocsSent(formData.documents_sent).length : 0} de {ALL_DOCUMENTS.filter((d) => {
                                     if (d.conditional === "MP" && !(formData.product_type || "").toString().toUpperCase().includes("MP")) return false;
                                     if (d.conditional === "CIF" && !(formData.incoterm || "").toString().toUpperCase().includes("CIF")) return false;
                                     return true;
@@ -4047,9 +4488,9 @@ export default function ContractsPage() {
             </div>
 
             {/* Modal Footer */}
-            <div className="mx-7 h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+            <div style={{ margin: "0 20px", height: 1, background: `linear-gradient(90deg, transparent, ${T.border}, transparent)` }} />
             {!viewMode && (
-              <div className="flex items-center justify-end gap-3 px-7 py-5">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "12px 20px", background: "rgba(11,83,148,0.015)" }}>
                 <Button
                   type="button"
                   variant="outline"
@@ -4061,7 +4502,8 @@ export default function ContractsPage() {
                 </Button>
                 <Button
                   type="button"
-                  className="rounded-xl bg-gradient-to-r from-[#1E3A5F] to-blue-600 hover:from-[#162d4a] hover:to-blue-700 text-white shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 px-6 transition-all duration-200 hover:scale-[1.02]"
+                  className="text-white px-6 transition-all duration-200 hover:scale-[1.02]"
+                  style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, borderRadius: T.radiusMd }}
                   disabled={submitting}
                   onClick={handleSubmit}
                 >
@@ -4072,7 +4514,7 @@ export default function ContractsPage() {
             )}
 
             {viewMode && (
-              <div className="flex items-center justify-between px-7 py-5">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", background: "rgba(11,83,148,0.015)" }}>
                 <Button
                   type="button"
                   variant="outline"
@@ -4110,7 +4552,8 @@ export default function ContractsPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* =====================================================
@@ -4141,6 +4584,57 @@ export default function ContractsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* =====================================================
+          Delete Confirmation Dialog
+          ===================================================== */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar Contrato</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que deseas eliminar el contrato{" "}
+              <span className="font-semibold text-slate-900">
+                {contractToDelete?.china_contract ||
+                  contractToDelete?.client_contract ||
+                  ""}
+              </span>
+              ? Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Column Selector Modal for PDF */}
+      <ColumnSelector
+        open={columnSelectorOpen}
+        onClose={() => setColumnSelectorOpen(false)}
+        allColumns={allPDFColumns}
+        onGenerate={(cols) => handleDownloadPDF(cols)}
+        title="Seleccionar columnas para el reporte PDF"
+        generating={downloadingPDF}
+      />
+
+      {/* Column Selector Modal for Excel */}
+      <ColumnSelector
+        open={excelColumnSelectorOpen}
+        onClose={() => setExcelColumnSelectorOpen(false)}
+        allColumns={allPDFColumns}
+        onGenerate={(cols) => { setExcelColumnSelectorOpen(false); handleDownloadExcel(cols); }}
+        title="Seleccionar columnas para el reporte Excel"
+        generating={downloading}
+        buttonLabel="Excel"
+      />
     </div>
   );
 }

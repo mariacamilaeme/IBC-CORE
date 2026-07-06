@@ -19,6 +19,7 @@ import {
   Users,
   FilterX,
 } from "lucide-react";
+import { T } from "@/lib/design-tokens";
 import { toast } from "sonner";
 import { cn, formatDate, formatCurrency } from "@/lib/utils";
 
@@ -406,28 +407,47 @@ export default function ContractInvoicesPage() {
   // =====================================================
 
   return (
+    <div style={{
+      background: T.glassBg,
+      backdropFilter: T.glassBlur,
+      border: `1px solid ${T.glassBorder}`,
+      borderRadius: T.radius,
+      boxShadow: T.shadowGlass,
+      padding: 28,
+    }}>
     <div className="space-y-6">
       {/* Breadcrumb */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: "#9CA3B4" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: "#0B5394", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: T.inkLight }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: T.accent, fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
           <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           Inicio
         </Link>
-        <span style={{ color: "#C5CAD5" }}>/</span>
-        <span style={{ fontWeight: 600, color: "#6B7080" }}>Facturas China</span>
+        <span style={{ color: T.borderLight }}>/</span>
+        <span style={{ fontWeight: 600, color: T.inkMuted }}>Facturas China</span>
       </div>
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1E3A5F]">Facturas China</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Control de facturas de proveedores chinos y valores asociados
-          </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: T.radiusMd,
+            background: "rgba(11,83,148,0.07)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: T.accent,
+          }}>
+            <Receipt className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink, letterSpacing: "-0.3px", lineHeight: 1.2, margin: 0 }}>Facturas China</h1>
+            <p style={{ fontSize: 13, color: T.inkMuted, margin: 0, marginTop: 2 }}>
+              Control de facturas de proveedores chinos y valores asociados
+            </p>
+          </div>
         </div>
         <Button
           onClick={openCreateForm}
-          className="bg-[#1E3A5F] hover:bg-[#2d5a8e] text-white"
+          className="text-white"
+          style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, borderRadius: T.radiusSm }}
         >
           <Plus className="h-4 w-4 mr-2" />
           Nueva Factura
@@ -435,12 +455,12 @@ export default function ContractInvoicesPage() {
       </div>
 
       {/* Filters Row */}
-      <Card className="border border-gray-200">
+      <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radiusMd, boxShadow: T.shadowGlass }}>
         <CardContent className="pt-6">
           <div className="flex flex-wrap gap-4 items-end">
             {/* Search */}
             <div className="flex-1 min-w-[250px]">
-              <Label className="text-sm text-gray-600 mb-1 block">Buscar</Label>
+              <Label className="text-sm mb-1 block" style={{ color: T.inkMuted }}>Buscar</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
@@ -454,7 +474,7 @@ export default function ContractInvoicesPage() {
 
             {/* Approved Filter */}
             <div className="min-w-[180px]">
-              <Label className="text-sm text-gray-600 mb-1 block">Estado</Label>
+              <Label className="text-sm mb-1 block" style={{ color: T.inkMuted }}>Estado</Label>
               <Select value={approvedFilter} onValueChange={setApprovedFilter}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Todos" />
@@ -486,44 +506,44 @@ export default function ContractInvoicesPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Facturas */}
-        <Card className="border border-gray-200">
+        <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radiusMd, boxShadow: T.shadowGlass }}>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500">Total Facturas</p>
-                <p className="text-2xl font-bold text-[#1E3A5F] mt-1">{totalCount}</p>
+                <p className="text-sm font-medium" style={{ color: T.inkMuted }}>Total Facturas</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: T.ink }}>{totalCount}</p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Receipt className="h-6 w-6 text-[#1E3A5F]" />
+              <div className="h-12 w-12 rounded-lg flex items-center justify-center" style={{ background: "rgba(11,83,148,0.07)" }}>
+                <Receipt className="h-6 w-6" style={{ color: T.accent }} />
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Valor Total China */}
-        <Card className="border border-gray-200">
+        <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radiusMd, boxShadow: T.shadowGlass }}>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500">Valor Total China</p>
-                <p className="text-2xl font-bold text-[#1E3A5F] mt-1">
+                <p className="text-sm font-medium" style={{ color: T.inkMuted }}>Valor Total China</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: T.ink }}>
                   {formatCurrency(summary.chinaTotal)}
                 </p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-emerald-50 flex items-center justify-center">
-                <DollarSign className="h-6 w-6 text-emerald-600" />
+              <div className="h-12 w-12 rounded-lg flex items-center justify-center" style={{ background: "rgba(14,165,165,0.08)" }}>
+                <DollarSign className="h-6 w-6" style={{ color: T.teal }} />
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Valor Total Cliente */}
-        <Card className="border border-gray-200">
+        <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radiusMd, boxShadow: T.shadowGlass }}>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500">Valor Total Cliente</p>
-                <p className="text-2xl font-bold text-[#1E3A5F] mt-1">
+                <p className="text-sm font-medium" style={{ color: T.inkMuted }}>Valor Total Cliente</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: T.ink }}>
                   {formatCurrency(summary.customerTotal)}
                 </p>
               </div>
@@ -535,17 +555,17 @@ export default function ContractInvoicesPage() {
         </Card>
 
         {/* Aprobadas */}
-        <Card className="border border-gray-200">
+        <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radiusMd, boxShadow: T.shadowGlass }}>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500">Aprobadas</p>
-                <p className="text-2xl font-bold text-[#1E3A5F] mt-1">
+                <p className="text-sm font-medium" style={{ color: T.inkMuted }}>Aprobadas</p>
+                <p className="text-2xl font-bold mt-1" style={{ color: T.ink }}>
                   {summary.approvedCount} de {summary.total}
                 </p>
               </div>
-              <div className="h-12 w-12 rounded-lg bg-green-50 flex items-center justify-center">
-                <CheckCircle2 className="h-6 w-6 text-green-600" />
+              <div className="h-12 w-12 rounded-lg flex items-center justify-center" style={{ background: "rgba(22,163,74,0.08)" }}>
+                <CheckCircle2 className="h-6 w-6" style={{ color: "#16A34A" }} />
               </div>
             </div>
           </CardContent>
@@ -553,15 +573,15 @@ export default function ContractInvoicesPage() {
       </div>
 
       {/* Data Table */}
-      <Card className="border border-gray-200">
+      <Card className="border" style={{ background: T.glassBg, borderColor: T.glassBorder, borderRadius: T.radius, boxShadow: T.shadowGlass, overflow: "hidden" }}>
         <CardContent className="p-0">
           {loading ? (
             <TableSkeleton />
           ) : invoices.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 gap-3">
-              <FileText className="h-12 w-12 text-gray-300" />
-              <p className="text-gray-500 font-medium">No se encontraron facturas</p>
-              <p className="text-sm text-gray-400">
+              <FileText className="h-12 w-12" style={{ color: T.borderLight }} />
+              <p className="font-medium" style={{ color: T.inkSoft }}>No se encontraron facturas</p>
+              <p className="text-sm" style={{ color: T.inkLight }}>
                 {hasActiveFilters
                   ? "Intente ajustar los filtros de busqueda"
                   : "Cree una nueva factura para comenzar"}
@@ -572,54 +592,57 @@ export default function ContractInvoicesPage() {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-gray-50/80">
-                      <TableHead className="font-semibold text-[#1E3A5F]">Fecha</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F]">Cliente</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F]"># Factura China</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F] text-right">Valor China</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F]">Contrato Cliente</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F] text-right">Valor Cliente</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F]">Estado</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F]">Notas</TableHead>
-                      <TableHead className="font-semibold text-[#1E3A5F] w-[50px]" />
+                    <TableRow style={{ background: "rgba(11,83,148,0.03)" }}>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Fecha</TableHead>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Cliente</TableHead>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}># Factura China</TableHead>
+                      <TableHead className="text-right" style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Valor China</TableHead>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Contrato Cliente</TableHead>
+                      <TableHead className="text-right" style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Valor Cliente</TableHead>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Estado</TableHead>
+                      <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Notas</TableHead>
+                      <TableHead className="w-[50px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {invoices.map((invoice) => (
                       <TableRow
                         key={invoice.id}
-                        className="hover:bg-gray-50/50 transition-colors"
+                        className="transition-colors"
+                        style={{ cursor: "default" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(11,83,148,0.03)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                       >
-                        <TableCell className="text-sm text-gray-700">
+                        <TableCell className="text-sm" style={{ color: T.inkSoft }}>
                           {formatDate(invoice.invoice_date)}
                         </TableCell>
-                        <TableCell className="text-sm text-gray-700">
+                        <TableCell className="text-sm" style={{ color: T.inkSoft }}>
                           {invoice.customer_name || "\u2014"}
                         </TableCell>
-                        <TableCell className="text-sm font-semibold text-[#1E3A5F]">
+                        <TableCell className="text-sm font-semibold" style={{ color: T.accent }}>
                           {invoice.china_invoice_number || "\u2014"}
                         </TableCell>
-                        <TableCell className="text-sm text-right font-medium text-gray-800">
+                        <TableCell className="text-sm text-right font-medium" style={{ color: T.ink }}>
                           {formatCurrency(invoice.china_invoice_value)}
                         </TableCell>
-                        <TableCell className="text-sm text-gray-700">
+                        <TableCell className="text-sm" style={{ color: T.inkSoft }}>
                           {invoice.customer_contract || "\u2014"}
                         </TableCell>
-                        <TableCell className="text-sm text-right font-medium text-gray-800">
+                        <TableCell className="text-sm text-right font-medium" style={{ color: T.ink }}>
                           {formatCurrency(invoice.customer_invoice_value)}
                         </TableCell>
                         <TableCell>
                           {invoice.approved ? (
-                            <Badge className="bg-green-100 text-green-800 border border-green-200 text-xs">
+                            <Badge style={{ background: "rgba(22,163,74,0.1)", color: "#16A34A", border: "1px solid rgba(22,163,74,0.2)", fontSize: 11, fontWeight: 600 }}>
                               Aprobada
                             </Badge>
                           ) : (
-                            <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs">
+                            <Badge style={{ background: "rgba(202,138,4,0.1)", color: "#CA8A04", border: "1px solid rgba(202,138,4,0.2)", fontSize: 11, fontWeight: 600 }}>
                               Pendiente
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm text-gray-500 max-w-[200px] truncate" title={invoice.notes || ""}>
+                        <TableCell className="text-sm max-w-[200px] truncate" style={{ color: T.inkLight }} title={invoice.notes || ""}>
                           {invoice.notes || "\u2014"}
                         </TableCell>
                         <TableCell>
@@ -659,8 +682,8 @@ export default function ContractInvoicesPage() {
               </div>
 
               {/* Pagination */}
-              <div className="flex items-center justify-between px-6 py-4 border-t">
-                <p className="text-sm text-gray-500">
+              <div className="flex items-center justify-between px-6 py-4" style={{ borderTop: `1px solid ${T.borderLight}` }}>
+                <p className="text-sm" style={{ color: T.inkLight }}>
                   Mostrando {showingFrom}-{showingTo} de {totalCount}
                 </p>
                 <div className="flex items-center gap-2">
@@ -669,10 +692,11 @@ export default function ContractInvoicesPage() {
                     size="sm"
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
+                    style={{ borderRadius: T.radiusSm }}
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  <span className="text-sm text-gray-600 min-w-[100px] text-center">
+                  <span className="text-sm min-w-[100px] text-center" style={{ color: T.inkMuted }}>
                     Pagina {currentPage} de {totalPages}
                   </span>
                   <Button
@@ -680,6 +704,7 @@ export default function ContractInvoicesPage() {
                     size="sm"
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
+                    style={{ borderRadius: T.radiusSm }}
                   >
                     <ChevronRight className="h-4 w-4" />
                   </Button>
@@ -706,7 +731,7 @@ export default function ContractInvoicesPage() {
           showCloseButton
         >
           <SheetHeader className="pb-4 border-b">
-            <SheetTitle className="text-[#1E3A5F]">
+            <SheetTitle style={{ color: T.ink, fontWeight: 700 }}>
               {editingInvoice ? "Editar Factura China" : "Nueva Factura China"}
             </SheetTitle>
             <SheetDescription>
@@ -866,7 +891,8 @@ export default function ContractInvoicesPage() {
               <Button
                 type="submit"
                 disabled={saving}
-                className="bg-[#1E3A5F] hover:bg-[#2d5a8e] text-white"
+                className="text-white"
+                style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, borderRadius: T.radiusSm }}
               >
                 {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {editingInvoice ? "Actualizar Factura" : "Crear Factura"}
@@ -875,6 +901,7 @@ export default function ContractInvoicesPage() {
           </form>
         </SheetContent>
       </Sheet>
+    </div>
     </div>
   );
 }

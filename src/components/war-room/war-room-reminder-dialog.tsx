@@ -165,7 +165,7 @@ export default function WarRoomReminderDialog({
       due_date: format(values.due_date, "yyyy-MM-dd"),
       remind_at: format(remindAt, "yyyy-MM-dd"),
       frequency: values.frequency,
-      assigned_to: values.assigned_to || null,
+      assigned_to: values.assigned_to || reminder?.assigned_to || null,
       send_email: values.send_email,
       email_recipient: values.send_email
         ? values.email_recipient || null

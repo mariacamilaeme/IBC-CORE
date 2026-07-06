@@ -31,6 +31,7 @@ import type { KpiDrawerType } from "@/components/war-room/war-room-kpi-drawer";
 import WarRoomTaskDialog from "@/components/war-room/war-room-task-dialog";
 import WarRoomNoteDialog from "@/components/war-room/war-room-note-dialog";
 import WarRoomReminderDialog from "@/components/war-room/war-room-reminder-dialog";
+import { T } from "@/lib/design-tokens";
 
 // =====================================================
 // War Room — Centro de Operaciones
@@ -413,8 +414,8 @@ export default function WarRoomPage() {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 border-2 border-[#0B5394] border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-[#6B7080]">Cargando War Room...</span>
+          <div className="h-8 w-8 border-2 rounded-full animate-spin" style={{ borderColor: T.accent, borderTopColor: "transparent" }} />
+          <span className="text-sm" style={{ color: T.inkMuted }}>Cargando War Room...</span>
         </div>
       </div>
     );
@@ -425,13 +426,13 @@ export default function WarRoomPage() {
   return (
     <div className="flex flex-col gap-5 pb-8">
       {/* Breadcrumb */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: "#9CA3B4" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: "#0B5394", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12.5, color: T.inkLight }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 4, color: T.accent, fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
           <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
           Inicio
         </Link>
-        <span style={{ color: "#C5CAD5" }}>/</span>
-        <span style={{ fontWeight: 600, color: "#6B7080" }}>Calendario</span>
+        <span style={{ color: T.borderLight }}>/</span>
+        <span style={{ fontWeight: 600, color: T.inkMuted }}>Calendario</span>
       </div>
 
       {/* Greeting */}
@@ -464,7 +465,14 @@ export default function WarRoomPage() {
 
         {/* ── RIGHT: Panel — Tareas / Recordatorios / Notas ── */}
         <div className="w-full xl:w-[38%] xl:min-w-0">
-          <div className="bg-white rounded-[18px] border border-[#F0EDE8] shadow-[0_1px_2px_rgba(26,29,35,0.03),0_2px_8px_rgba(26,29,35,0.04)] h-full flex flex-col">
+          <div className="rounded-[18px] h-full flex flex-col" style={{
+            background: T.glassBg,
+            backdropFilter: T.glassBlur,
+            WebkitBackdropFilter: T.glassBlur,
+            border: "1px solid " + T.glassBorder,
+            borderRadius: T.radius,
+            boxShadow: T.shadowGlass,
+          }}>
             <Tabs value={activePanel} onValueChange={setActivePanel} className="flex flex-col h-full">
               {/* Tab header */}
               <div className="px-5 pt-5 pb-2 shrink-0">

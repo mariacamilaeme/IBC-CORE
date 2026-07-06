@@ -56,14 +56,15 @@ function Ring({ value, max, size = 48, sw = 4, color, bg }: { value: number; max
 function Card({ children, style = {}, delay = 0, hover = false, onClick }: { children: React.ReactNode; style?: React.CSSProperties; delay?: number; hover?: boolean; onClick?: () => void }) {
   return (
     <div onClick={onClick} style={{
-      background: T.surface, borderRadius: T.radius, border: `1px solid ${T.borderLight}`,
-      boxShadow: T.shadow, animation: `qFadeUp 0.55s cubic-bezier(0.4,0,0.2,1) ${delay}ms both`,
+      background: T.glassBg, borderRadius: T.radius, border: `1px solid ${T.glassBorder}`,
+      backdropFilter: T.glassBlur,
+      boxShadow: T.shadowGlass, animation: `qFadeUp 0.55s cubic-bezier(0.4,0,0.2,1) ${delay}ms both`,
       overflow: "hidden", cursor: onClick ? "pointer" : "default",
       transition: hover ? "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)" : undefined,
       ...style,
     }}
     onMouseEnter={hover ? (e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = T.shadowLg; } : undefined}
-    onMouseLeave={hover ? (e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadow; } : undefined}
+    onMouseLeave={hover ? (e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowGlass; } : undefined}
     >{children}</div>
   );
 }
@@ -88,9 +89,10 @@ function ModuleCard({ title, desc, tags, stat, statLabel, icon, accentColor, del
       onClick={() => router.push(href)}
       style={{
         borderRadius: T.radiusMd,
-        background: T.surface,
-        border: `1px solid ${T.borderLight}`,
-        boxShadow: T.shadow,
+        background: T.glassBg,
+        backdropFilter: T.glassBlur,
+        border: `1px solid ${T.glassBorder}`,
+        boxShadow: T.shadowGlass,
         cursor: "pointer",
         overflow: "hidden",
         animation: `qFadeUp 0.45s cubic-bezier(0.4,0,0.2,1) ${delay}ms both`,
@@ -99,12 +101,12 @@ function ModuleCard({ title, desc, tags, stat, statLabel, icon, accentColor, del
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = accentColor + "30";
-        e.currentTarget.style.boxShadow = `0 6px 24px ${accentColor}12, 0 2px 8px rgba(26,29,35,0.04)`;
+        e.currentTarget.style.boxShadow = `0 6px 24px ${accentColor}12, 0 2px 8px rgba(11,83,148,0.04)`;
         e.currentTarget.style.transform = "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = T.borderLight;
-        e.currentTarget.style.boxShadow = T.shadow;
+        e.currentTarget.style.borderColor = T.glassBorder;
+        e.currentTarget.style.boxShadow = T.shadowGlass;
         e.currentTarget.style.transform = "translateY(0)";
       }}
     >
@@ -273,15 +275,18 @@ export default function QuotationsHubPage() {
       {/* Header Banner */}
       <div style={{
         position: "relative", overflow: "hidden", borderRadius: 14,
-        background: "linear-gradient(135deg, #1E3A5F 0%, #2a4d7a 50%, #3B82F6 100%)",
+        background: T.gradientPrimary,
         padding: "14px 24px", marginBottom: 16,
-        boxShadow: "0 4px 24px rgba(30,58,95,0.18)",
+        boxShadow: T.shadowGlass,
         animation: "qFadeIn 0.4s ease both",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.07,
-          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-          backgroundSize: "20px 20px",
+          position: "absolute", inset: 0,
+          background: "radial-gradient(620px 240px at 88% -30%, rgba(255,255,255,0.16), transparent 62%), radial-gradient(520px 260px at 6% 130%, rgba(0,184,224,0.20), transparent 60%)",
+        }} />
+        <div style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, height: 2,
+          background: "linear-gradient(90deg, #00B8E0 0%, rgba(0,184,224,0.25) 40%, transparent 75%)",
         }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -293,8 +298,8 @@ export default function QuotationsHubPage() {
             <div>
               <h1 style={{
                 fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
-                fontSize: 18, fontWeight: 800, color: "#fff",
-                letterSpacing: "-0.02em", lineHeight: 1.2,
+                fontSize: 22, fontWeight: 700, color: "#fff",
+                letterSpacing: "-0.3px", lineHeight: 1.2,
               }}>Cotizaciones</h1>
               <p style={{ fontSize: 12, color: "rgba(191,219,254,0.7)", fontWeight: 500 }}>
                 Gestión del ciclo de vida de cotizaciones
@@ -323,11 +328,11 @@ export default function QuotationsHubPage() {
                 background: "#fff", color: "#1E3A5F", fontWeight: 700, fontSize: 12,
                 cursor: "pointer", fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif",
                 display: "flex", alignItems: "center", gap: 5,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                boxShadow: T.shadowMd,
                 transition: "all 0.2s ease",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = T.shadowGlass; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = T.shadowMd; }}
             >{I.plus} Nueva Cotización</button>
           </div>
         </div>

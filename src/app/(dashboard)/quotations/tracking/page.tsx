@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -423,7 +424,6 @@ export default function TrackingPage() {
     ];
 
     // ── Row 1: Unified header ──
-    ws.mergeCells(1, 1, 1, columns.length);
     const bannerCell = ws.getCell("A1");
     const dateStr = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
     bannerCell.value = { richText: [
@@ -442,7 +442,6 @@ export default function TrackingPage() {
     addLogoToHeader(ws, logoId, columns.length);
 
     // ── Row 2: Spacer ──
-    ws.mergeCells(2, 1, 2, columns.length);
     ws.getRow(2).height = 5;
     for (let col = 1; col <= columns.length; col++) {
       ws.getRow(2).getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
@@ -521,7 +520,6 @@ export default function TrackingPage() {
 
     // ── Footer row ──
     const footerRowNum = rows.length + 4;
-    ws.mergeCells(footerRowNum, 1, footerRowNum, columns.length);
     const footerCell = ws.getCell(`A${footerRowNum}`);
     footerCell.value = { richText: [
       { text: "IBC Core", font: { name: "Aptos", size: 8.5, bold: true, color: { argb: "1E3A5F" } } },
@@ -702,8 +700,8 @@ export default function TrackingPage() {
       {/* HEADER */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E3A5F]">Trazabilidad Cotizaciones</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: T.ink, letterSpacing: "-0.3px" }}>Trazabilidad Cotizaciones</h1>
+          <p style={{ color: T.inkMuted }} className="text-sm mt-1">
             Gestiona el pipeline comercial y seguimiento de cotizaciones
           </p>
         </div>
@@ -718,7 +716,8 @@ export default function TrackingPage() {
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 bg-[#1E3A5F] hover:bg-[#2A4D7A] text-white rounded-xl shadow-lg shadow-[#1E3A5F]/20 font-semibold transition-all duration-200 hover:scale-[1.02]"
+            className="gap-1.5 text-white rounded-xl font-semibold transition-all duration-200 hover:scale-[1.02]"
+            style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}
             onClick={openCreateDialog}
           >
             <Plus className="w-4 h-4" />
@@ -730,7 +729,7 @@ export default function TrackingPage() {
       {/* KPI CARDS */}
       <div className="grid grid-cols-5 gap-3.5">
         {/* Total Cotizaciones */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div className="rounded-xl p-5 hover:-translate-y-0.5 transition-all" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -756,7 +755,7 @@ export default function TrackingPage() {
         </div>
 
         {/* Valor Pipeline */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div className="rounded-xl p-5 hover:-translate-y-0.5 transition-all" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
@@ -779,7 +778,7 @@ export default function TrackingPage() {
         </div>
 
         {/* Tasa de Conversion */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div className="rounded-xl p-5 hover:-translate-y-0.5 transition-all" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
@@ -809,7 +808,7 @@ export default function TrackingPage() {
         </div>
 
         {/* Tiempo Respuesta */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div className="rounded-xl p-5 hover:-translate-y-0.5 transition-all" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
@@ -837,7 +836,7 @@ export default function TrackingPage() {
         </div>
 
         {/* Por Estado - Donut */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
+        <div className="rounded-xl p-5 hover:-translate-y-0.5 transition-all" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
               <BarChart3 className="w-4 h-4 text-slate-600" />
@@ -865,7 +864,7 @@ export default function TrackingPage() {
       </div>
 
       {/* MAIN TABLE CARD */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="rounded-2xl overflow-hidden" style={{ background: T.glassBg, backdropFilter: T.glassBlur, border: "1px solid " + T.glassBorder, boxShadow: T.shadowGlass }}>
         {/* Status Tabs + View Switcher */}
         <div className="flex items-center justify-between border-b border-slate-200 px-5">
           <div className="flex items-center gap-0">
@@ -1328,7 +1327,8 @@ export default function TrackingPage() {
                           key={item}
                           variant={currentPage === item ? "default" : "outline"}
                           size="sm"
-                          className={cn("h-8 w-8 p-0 text-xs", currentPage === item && "bg-[#2563EB] text-white hover:bg-[#1D4ED8]")}
+                          className={cn("h-8 w-8 p-0 text-xs", currentPage === item && "text-white")}
+                          style={currentPage === item ? { background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd } : {}}
                           onClick={() => setCurrentPage(item)}
                         >
                           {item}
@@ -1415,7 +1415,7 @@ export default function TrackingPage() {
       {/* MANAGE COMMERCIALS DIALOG */}
       <Dialog open={commercialsOpen} onOpenChange={setCommercialsOpen}>
         <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden border-0 shadow-2xl">
-          <div className="bg-gradient-to-r from-[#1E3A5F] to-[#2A4D7A] px-6 py-4">
+          <div className="px-6 py-4" style={{ background: T.gradientPrimary }}>
             <DialogHeader>
               <DialogTitle className="text-white text-base font-bold">Gestionar Comerciales</DialogTitle>
               <DialogDescription className="text-blue-200 text-xs">
@@ -1432,7 +1432,7 @@ export default function TrackingPage() {
                 onKeyDown={(e) => e.key === "Enter" && handleAddCommercial()}
                 className="flex-1 rounded-xl"
               />
-              <Button onClick={handleAddCommercial} size="sm" className="rounded-xl bg-[#1E3A5F] hover:bg-[#2A4D7A] gap-1">
+              <Button onClick={handleAddCommercial} size="sm" className="rounded-xl gap-1 text-white" style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd }}>
                 <Plus className="w-3.5 h-3.5" />
                 Añadir
               </Button>
