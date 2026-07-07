@@ -988,7 +988,7 @@ export default function DashboardPage() {
           {[
             { label: "Contratos", href: "/contracts" },
             { label: "Reportes", href: "/reports" },
-            { label: "Cotizaciones", href: "/quotations" },
+            { label: "Clientes", href: "/clients" },
           ].map(l => (
             <Link key={l.label} href={l.href} style={{ fontSize: 11, color: T.inkMuted, fontWeight: 600, textDecoration: "none", transition: "color 0.15s" }}>
               {l.label}

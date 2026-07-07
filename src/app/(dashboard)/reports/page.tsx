@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { T } from "@/lib/design-tokens";
+import { HIDDEN_REPORTS } from "@/lib/feature-flags";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
 const I = {
@@ -142,7 +143,7 @@ export default function ReportsHubPage() {
         const [prodRes, contRes, payRes, invRes, docTrackRes, filtersRes] = await Promise.all([
           fetch("/api/contracts?status=EN PRODUCCIÓN&pageSize=1"),
           fetch("/api/contracts?pageSize=1"),
-          fetch("/api/payments?pageSize=1"),
+          HIDDEN_REPORTS.has("payments") ? Promise.resolve(null) : fetch("/api/payments?pageSize=1"),
           fetch("/api/invoices?pageSize=1"),
           fetch("/api/contracts?status=EN TRÁNSITO,EN PRODUCCIÓN&pageSize=5000"),
           fetch("/api/contracts/filters"),
@@ -154,7 +155,7 @@ export default function ReportsHubPage() {
           setClientsCount((j.client_names || []).length);
           setCommercialsCount((j.commercial_names || []).length);
         }
-        if (payRes.ok) { const j = await payRes.json(); setPaymentsCount(j.count || 0); }
+        if (payRes && payRes.ok) { const j = await payRes.json(); setPaymentsCount(j.count || 0); }
         if (invRes.ok) { const j = await invRes.json(); setInvoicesCount(j.count || 0); }
         // Doc tracking: EN TRÁNSITO/PRODUCCIÓN con documentos pendientes,
         // o con motonave asignada y aún sin enviar documentos.
@@ -320,6 +321,7 @@ export default function ReportsHubPage() {
           stat={carteraTotal >= 1_000_000 ? `$${(carteraTotal / 1_000_000).toFixed(2)}M` : carteraTotal >= 1_000 ? `$${(carteraTotal / 1_000).toFixed(0)}K` : `$${carteraTotal.toFixed(0)}`}
           statLabel="por cobrar"
         />
+        {!HIDDEN_REPORTS.has("payments") && (
         <ModuleCard
           delay={650}
           href="/reports/payments"
@@ -334,6 +336,7 @@ export default function ReportsHubPage() {
           stat={String(paymentsCount)}
           statLabel="pagos"
         />
+        )}
         <ModuleCard
           delay={700}
           href="/reports/invoices"
@@ -387,7 +390,7 @@ export default function ReportsHubPage() {
         <div style={{ display: "flex", gap: 20 }}>
           {[
             { label: "Contratos", href: "/contracts" },
-            { label: "Cotizaciones", href: "/quotations" },
+            { label: "Clientes", href: "/clients" },
             { label: "Dashboard", href: "/" },
           ].map(l => (
             <Link key={l.label} href={l.href} style={{ fontSize: 11, color: T.inkMuted, fontWeight: 600, textDecoration: "none", transition: "color 0.15s" }}>{l.label}</Link>

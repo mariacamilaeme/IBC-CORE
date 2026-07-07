@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { T } from "@/lib/design-tokens";
+import { HIDDEN_REPORTS } from "@/lib/feature-flags";
 
 // ─── ICONS ───────────────────────────────────────────────────
 const TabIcons = {
@@ -25,6 +26,8 @@ const TABS = [
   { key: "quotations", label: "Cotizaciones", href: "/reports/quotations", icon: TabIcons.quotations },
   { key: "document-tracking", label: "Documentos", href: "/reports/document-tracking", icon: TabIcons.documentTracking },
 ] as const;
+
+const VISIBLE_TABS = TABS.filter((t) => !HIDDEN_REPORTS.has(t.key));
 
 export default function ReportsLayout({
   children,
@@ -73,7 +76,7 @@ export default function ReportsLayout({
               boxShadow: T.shadow,
               padding: 3, flex: 1,
             }}>
-              {TABS.map((tab) => {
+              {VISIBLE_TABS.map((tab) => {
                 const isActive = pathname.startsWith(tab.href);
                 return (
                   <button

@@ -183,19 +183,59 @@ function readFacturasSheet(workbook: XLSX.WorkBook) {
 
 type AnyClient = Awaited<ReturnType<typeof createServiceClient>>;
 
-async function fetchAll(supabase: AnyClient, table: string) {
+async function fetchAll(supabase: AnyClient, table: string, columns = "*") {
   const PAGE_SIZE = 1000;
   let all: Record<string, unknown>[] = [];
   let from = 0;
   while (true) {
-    const { data, error } = await supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
+    const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(`Error leyendo ${table}: ${error.message}`);
     if (!data || data.length === 0) break;
-    all = all.concat(data);
+    all = all.concat(data as unknown as Record<string, unknown>[]);
     if (data.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
   return all;
+}
+
+// Escritura por lotes: una petición por cada 500 filas en lugar de una por fila.
+// Si un lote falla, se reintenta fila a fila solo ese lote para reportar los registros con problema.
+const BATCH_SIZE = 500;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+type WriteCounters = { ok: number; errors: number; errorSamples: string[] };
+
+async function bulkWrite(
+  supabase: AnyClient,
+  table: string,
+  rows: Record<string, unknown>[],
+  mode: "insert" | "upsert",
+  counters: WriteCounters,
+  keyOf: (r: Record<string, unknown>) => string,
+) {
+  for (const part of chunk(rows, BATCH_SIZE)) {
+    const { error } = mode === "insert"
+      ? await supabase.from(table).insert(part)
+      : await supabase.from(table).upsert(part, { onConflict: "id" });
+    if (!error) {
+      counters.ok += part.length;
+      continue;
+    }
+    for (const row of part) {
+      const single = mode === "insert"
+        ? await supabase.from(table).insert(row)
+        : await supabase.from(table).upsert(row, { onConflict: "id" });
+      if (single.error) {
+        counters.errors++;
+        if (counters.errorSamples.length < 5) counters.errorSamples.push(`${mode.toUpperCase()} ${keyOf(row)}: ${single.error.message}`);
+      } else counters.ok++;
+    }
+  }
 }
 
 type ContractRow = ReturnType<typeof readStatusSheet>["contracts"][number];
@@ -203,7 +243,7 @@ type SkippedRow = ReturnType<typeof readStatusSheet>["skipped"][number];
 type InvoiceRow = ReturnType<typeof readFacturasSheet>["invoices"][number];
 
 async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
-  const existing = await fetchAll(supabase, "contracts");
+  const existing = await fetchAll(supabase, "contracts", "id, client_contract, china_contract");
 
   // PARCIALES rename
   let renamed = 0;
@@ -236,73 +276,79 @@ async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
     existingMap.set(key, c);
   }
 
-  let inserted = 0;
-  let updated = 0;
-  let errors = 0;
-  const errorSamples: string[] = [];
-
+  // Dedupe por clave natural — la última fila del Excel gana (mismo resultado
+  // neto que el proceso secuencial anterior, donde la última escritura pisaba a la primera)
+  const byKey = new Map<string, ContractRow>();
   for (const contract of contracts) {
     const key = `${(contract.client_contract || "").trim()}|${(contract.china_contract || "").trim()}`;
-    const match = existingMap.get(key);
-    if (match) {
-      const { error } = await supabase.from("contracts").update(contract).eq("id", match.id as string);
-      if (error) {
-        errors++;
-        if (errorSamples.length < 5) errorSamples.push(`UPDATE ${key}: ${error.message}`);
-      } else updated++;
-    } else {
-      const { data, error } = await supabase.from("contracts").insert(contract).select("id, client_contract, china_contract").single();
-      if (error) {
-        errors++;
-        if (errorSamples.length < 5) errorSamples.push(`INSERT ${key}: ${error.message}`);
-      } else {
-        inserted++;
-        if (data) existingMap.set(key, data as Record<string, unknown>);
-      }
-    }
+    byKey.set(key, contract);
   }
-  return { inserted, updated, renamed, errors, errorSamples };
+
+  const toInsert: Record<string, unknown>[] = [];
+  const toUpdate: Record<string, unknown>[] = [];
+  for (const [key, contract] of byKey) {
+    const match = existingMap.get(key);
+    if (match) toUpdate.push({ id: match.id, ...contract });
+    else toInsert.push({ ...contract });
+  }
+
+  const ins: WriteCounters = { ok: 0, errors: 0, errorSamples: [] };
+  const upd: WriteCounters = { ok: 0, errors: 0, errorSamples: [] };
+  const keyOf = (r: Record<string, unknown>) => `${r.client_contract || ""}|${r.china_contract || ""}`;
+  await bulkWrite(supabase, "contracts", toInsert, "insert", ins, keyOf);
+  await bulkWrite(supabase, "contracts", toUpdate, "upsert", upd, keyOf);
+
+  return {
+    inserted: ins.ok,
+    updated: upd.ok,
+    renamed,
+    duplicates_in_file: contracts.length - byKey.size,
+    errors: ins.errors + upd.errors,
+    errorSamples: [...ins.errorSamples, ...upd.errorSamples].slice(0, 5),
+  };
 }
 
 async function upsertInvoices(supabase: AnyClient, invoices: InvoiceRow[]) {
-  const existing = await fetchAll(supabase, "contract_invoices");
+  const existing = await fetchAll(supabase, "contract_invoices", "id, china_invoice_number, customer_contract");
   const existingMap = new Map<string, Record<string, unknown>>();
   for (const inv of existing) {
     const key = `${((inv.china_invoice_number as string) || "").trim()}|${((inv.customer_contract as string) || "").trim()}`;
     existingMap.set(key, inv);
   }
 
-  let inserted = 0;
-  let updated = 0;
-  let errors = 0;
-  const errorSamples: string[] = [];
-
+  const byKey = new Map<string, InvoiceRow>();
   for (const invoice of invoices) {
     const key = `${(invoice.china_invoice_number || "").trim()}|${(invoice.customer_contract || "").trim()}`;
-    const match = existingMap.get(key);
-    if (match) {
-      const { error } = await supabase.from("contract_invoices").update(invoice).eq("id", match.id as string);
-      if (error) {
-        errors++;
-        if (errorSamples.length < 5) errorSamples.push(`UPDATE ${key}: ${error.message}`);
-      } else updated++;
-    } else {
-      const { data, error } = await supabase.from("contract_invoices").insert(invoice).select("id, china_invoice_number, customer_contract").single();
-      if (error) {
-        errors++;
-        if (errorSamples.length < 5) errorSamples.push(`INSERT ${key}: ${error.message}`);
-      } else {
-        inserted++;
-        if (data) existingMap.set(key, data as Record<string, unknown>);
-      }
-    }
+    byKey.set(key, invoice);
   }
-  return { inserted, updated, errors, errorSamples };
+
+  const toInsert: Record<string, unknown>[] = [];
+  const toUpdate: Record<string, unknown>[] = [];
+  for (const [key, invoice] of byKey) {
+    const match = existingMap.get(key);
+    if (match) toUpdate.push({ id: match.id, ...invoice });
+    else toInsert.push({ ...invoice });
+  }
+
+  const ins: WriteCounters = { ok: 0, errors: 0, errorSamples: [] };
+  const upd: WriteCounters = { ok: 0, errors: 0, errorSamples: [] };
+  const keyOf = (r: Record<string, unknown>) => `${r.china_invoice_number || ""}|${r.customer_contract || ""}`;
+  await bulkWrite(supabase, "contract_invoices", toInsert, "insert", ins, keyOf);
+  await bulkWrite(supabase, "contract_invoices", toUpdate, "upsert", upd, keyOf);
+
+  return {
+    inserted: ins.ok,
+    updated: upd.ok,
+    duplicates_in_file: invoices.length - byKey.size,
+    errors: ins.errors + upd.errors,
+    errorSamples: [...ins.errorSamples, ...upd.errorSamples].slice(0, 5),
+  };
 }
 
 // ----- handler ---------------------------------------------------------
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   // 1. Auth: solo admin / directora
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -379,8 +425,11 @@ export async function POST(request: NextRequest) {
 
   let contractResult, invoiceResult;
   try {
-    contractResult = await upsertContracts(serviceClient, contracts);
-    invoiceResult = await upsertInvoices(serviceClient, invoices);
+    // Tablas independientes — se migran en paralelo
+    [contractResult, invoiceResult] = await Promise.all([
+      upsertContracts(serviceClient, contracts),
+      upsertInvoices(serviceClient, invoices),
+    ]);
   } catch (err) {
     return NextResponse.json({ error: `Error durante la migración: ${(err as Error).message}` }, { status: 500 });
   }
@@ -397,6 +446,7 @@ export async function POST(request: NextRequest) {
       inserted: contractResult.inserted,
       updated: contractResult.updated,
       renamed: contractResult.renamed,
+      duplicates_in_file: contractResult.duplicates_in_file,
       errors: contractResult.errors,
       error_samples: contractResult.errorSamples,
       skipped: skippedContracts.length,
@@ -406,11 +456,13 @@ export async function POST(request: NextRequest) {
       total: invoices.length,
       inserted: invoiceResult.inserted,
       updated: invoiceResult.updated,
+      duplicates_in_file: invoiceResult.duplicates_in_file,
       auto_approved_legacy: autoApproved,
       auto_approve_cutoff: AUTO_APPROVE_CUTOFF,
       errors: invoiceResult.errors,
       error_samples: invoiceResult.errorSamples,
     },
+    duration_ms: Date.now() - startedAt,
     processed_at: new Date().toISOString(),
     processed_by: profile.full_name,
   });

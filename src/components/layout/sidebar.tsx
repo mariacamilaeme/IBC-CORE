@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { usePermissions } from "@/hooks/usePermissions";
+import { HIDDEN_MODULES } from "@/lib/feature-flags";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -67,6 +68,7 @@ export function Sidebar() {
 
   const userRole = profile?.role || "comercial";
   const filteredNav = navItems.filter((item) => {
+    if (item.module && HIDDEN_MODULES.has(item.module)) return false;
     if (!item.module) return true;
     return canViewModule(item.module);
   });
