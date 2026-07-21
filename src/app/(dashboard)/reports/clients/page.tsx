@@ -284,6 +284,23 @@ export default function ClientsReportPage() {
     { header: "NOTAS", dataKey: "notes", width: 1.5 },
   ];
 
+  // Columnas marcadas por defecto al abrir el selector (Excel y PDF):
+  // contrato cliente, cliente, detalle, tons acordadas/embarcadas, estado,
+  // ETA final, motonave, BL, puerto llegada y valor pendiente.
+  const defaultSelectedColumns = [
+    "client_contract",
+    "client_name",
+    "detail",
+    "tons_agreed",
+    "tons_shipped",
+    "status",
+    "eta_final",
+    "vessel_name",
+    "bl_number",
+    "arrival_port",
+    "pending_amount",
+  ];
+
   // ---------------------------------------------------------------------------
   // Excel Export
   // ---------------------------------------------------------------------------
@@ -850,6 +867,7 @@ export default function ClientsReportPage() {
       open={excelSelectorOpen}
       onClose={() => setExcelSelectorOpen(false)}
       allColumns={allPDFColumns}
+      defaultSelected={defaultSelectedColumns}
       onGenerate={(cols) => { setExcelSelectorOpen(false); handleDownloadExcel(cols); }}
       title="Seleccionar columnas (Excel)"
     />
@@ -857,6 +875,7 @@ export default function ClientsReportPage() {
       open={pdfSelectorOpen}
       onClose={() => setPdfSelectorOpen(false)}
       allColumns={allPDFColumns}
+      defaultSelected={defaultSelectedColumns}
       onGenerate={(cols) => { setPdfSelectorOpen(false); handleDownloadPDF(cols); }}
       title="Seleccionar columnas (PDF)"
     />

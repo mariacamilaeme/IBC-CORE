@@ -228,6 +228,7 @@ type SortField =
   | "client_name"
   | "detail"
   | "tons_agreed"
+  | "vessel_name"
   | "incoterm"
   | "status"
   | "eta_final"
@@ -2919,15 +2920,14 @@ export default function ContractsPage() {
                       onSort={handleSort}
                     />
                   </TableHead>
-                  {/* Tons */}
-                  <TableHead className={cn("px-2 py-2 text-right", isSaldosView ? "w-[5%]" : "w-[6%]")}>
+                  {/* Motonave */}
+                  <TableHead className={cn("px-2 py-2", isSaldosView ? "w-[7%]" : "w-[8%]")}>
                     <SortableHeader
-                      label="Tons"
-                      field="tons_agreed"
+                      label="Motonave"
+                      field="vessel_name"
                       sortField={sortField}
                       sortDirection={sortDirection}
                       onSort={handleSort}
-                      className="justify-end"
                     />
                   </TableHead>
                   {/* Incoterm */}
@@ -3016,9 +3016,11 @@ export default function ContractsPage() {
                         {truncate(contract.detail, 25)}
                       </span>
                     </TableCell>
-                    {/* Tons */}
-                    <TableCell className="px-2 py-2.5 text-xs text-right text-slate-600 tabular-nums font-medium">
-                      {formatNumber(contract.tons_agreed)}
+                    {/* Motonave */}
+                    <TableCell className="px-2 py-2.5 text-xs text-slate-600 font-medium truncate">
+                      <span title={contract.vessel_name || ""}>
+                        {contract.vessel_name ? truncate(contract.vessel_name, 18) : "—"}
+                      </span>
                     </TableCell>
                     {/* Incoterm */}
                     <TableCell className="px-2 py-2.5">

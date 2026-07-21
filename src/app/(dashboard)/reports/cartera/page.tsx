@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, RefreshCw, FileDown, Search, X } from "lucide-react";
+import { Download, RefreshCw, FileDown, Search, X, FolderDown } from "lucide-react";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import { useCarteraData, FilterPopover, STATUS_OPTIONS, labelFor } from "./_core";
@@ -31,6 +31,11 @@ export default function CarteraReportPage() {
           <Button variant="outline" size="sm" className="h-9 gap-1.5 rounded-xl border-slate-200" onClick={d.fetchData}><RefreshCw className="w-3.5 h-3.5" /> Actualizar</Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl" variant="outline" onClick={d.handleDownloadPDF} style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}><FileDown className="w-3.5 h-3.5" /> PDF</Button>
           <Button size="sm" className="h-9 gap-1.5 rounded-xl" onClick={d.handleDownloadExcel} style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}><Download className="w-3.5 h-3.5" /> Excel</Button>
+          <Button size="sm" className="h-9 gap-1.5 rounded-xl" onClick={d.handleDownloadExcelPorCliente}
+            title="Descarga un archivo de Excel independiente por cada cliente de la vista actual (respeta los filtros aplicados)"
+            style={{ background: "linear-gradient(135deg, #0B72B8, #00B8E0)", border: "none", boxShadow: T.shadowMd, color: "white" }}>
+            <FolderDown className="w-3.5 h-3.5" /> Excel × cliente ({d.groups.length})
+          </Button>
         </div>
       </div>
 

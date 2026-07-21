@@ -117,6 +117,11 @@ export default function StatusProductionPage() {
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Diálogo de transformación (anexar Excel a transformar) y menú de exportes
+  const [transformDialog, setTransformDialog] = useState(false);
+  const transformInputRef = useRef<HTMLInputElement>(null);
+  const [exportMenu, setExportMenu] = useState(false);
+
   const normKey = (s: string | null | undefined) => (s || "").trim().toUpperCase();
 
   const handleAttachFile = async (file: File) => {
@@ -197,15 +202,20 @@ export default function StatusProductionPage() {
     setImporting(true);
     let ok = 0;
     let fail = 0;
+    // Las notas de China NO se guardan en los contratos: al módulo de contratos
+    // solo van motonave y fecha de zarpe. Las notas quedan en memoria como
+    // overrides para reflejarse únicamente en el reporte de reunión.
+    const noteOverrides: Record<string, TransformOverride> = {};
+    for (const ch of importPreview.changes) {
+      if (ch.note) noteOverrides[ch.id] = { notes: ch.note };
+    }
+    const notesForReport = Object.keys(noteOverrides).length;
     try {
       for (const ch of importPreview.changes) {
-        if (!ch.vesselTo && !ch.etdTo && !ch.note) continue;
-        // Las notas de China van al CONTRATO (las lee el reporte de reunión),
-        // no al borrador local — así el próximo reporte inicial sale limpio.
-        const body: { id: string; vessel_name?: string; etd?: string; notes?: string } = { id: ch.id };
+        if (!ch.vesselTo && !ch.etdTo) continue;
+        const body: { id: string; vessel_name?: string; etd?: string } = { id: ch.id };
         if (ch.vesselTo) body.vessel_name = ch.vesselTo;
         if (ch.etdTo) body.etd = ch.etdTo;
-        if (ch.note) body.notes = ch.note;
         const res = await fetch("/api/contracts", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -218,21 +228,32 @@ export default function StatusProductionPage() {
           console.error("Error actualizando contrato", ch.id, j.error);
         }
       }
+      const overrides = notesForReport > 0 ? noteOverrides : null;
+      setTransformOverrides(overrides);
       if (ok > 0) {
         fetchContracts();
-        setTransformOverrides(null); // los datos ya viven en los contratos
         // Paso siguiente del flujo: transformar el reporte ya cruzado
-        toast.success(`Reporte anexado: ${ok} embarque${ok !== 1 ? "s" : ""} actualizado${ok !== 1 ? "s" : ""}`, {
-          description: "Los datos quedaron cruzados con el módulo de contratos.",
+        toast.success(`Reporte anexado: ${ok} embarque${ok !== 1 ? "s" : ""} actualizado${ok !== 1 ? "s" : ""} (motonave / fecha de zarpe)`, {
+          description: notesForReport > 0
+            ? `${notesForReport} nota${notesForReport !== 1 ? "s" : ""} quedaron solo para el reporte de reunión — no se guardaron en los contratos.`
+            : "Los datos quedaron cruzados con el módulo de contratos.",
           action: {
             label: "Transformar reporte",
-            onClick: () => handleTransform(),
+            onClick: () => handleTransform(overrides ?? undefined),
+          },
+          duration: 12000,
+        });
+      } else if (fail === 0 && notesForReport > 0) {
+        toast.info(`Sin cambios de motonave o fecha — ${notesForReport} nota${notesForReport !== 1 ? "s" : ""} quedaron solo para el reporte de reunión`, {
+          action: {
+            label: "Transformar reporte",
+            onClick: () => handleTransform(noteOverrides),
           },
           duration: 12000,
         });
       }
       if (fail > 0) toast.error(`${fail} embarque${fail !== 1 ? "s" : ""} no se pudo actualizar`);
-      if (ok === 0 && fail === 0) toast.info("No había cambios que aplicar");
+      if (ok === 0 && fail === 0 && notesForReport === 0) toast.info("No había cambios que aplicar");
     } finally {
       setImporting(false);
       setImportPreview(null);
@@ -309,33 +330,121 @@ export default function StatusProductionPage() {
   // ── Transformar reporte: HTML ejecutivo para reunión ──
   // Incluye EN PRODUCCIÓN + EN TRÁNSITO para clasificar por etapa operativa
   // (en producción / nominado por zarpar / en tránsito / equipos).
-  const handleTransform = async (overridesArg?: Record<string, TransformOverride>) => {
-    // Overrides pasados directamente (Ignorar y transformar) o los que
-    // quedaron en memoria de un anexo previo no aplicado.
+  // Trae todos los contratos EN PRODUCCIÓN + EN TRÁNSITO (paginado)
+  const fetchAllActive = async (): Promise<Contract[]> => {
+    const res = await fetch(
+      "/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=1&sort_field=client_name&sort_direction=asc"
+    );
+    if (!res.ok) throw new Error("Error al obtener contratos");
+    const json = await res.json();
+    let all: Contract[] = json.data || [];
+    const total: number = json.count ?? all.length;
+    let page = 2;
+    while (all.length < total && page <= 10) {
+      const r = await fetch(
+        `/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=${page}&sort_field=client_name&sort_direction=asc`
+      );
+      if (!r.ok) break;
+      const j = await r.json();
+      const batch: Contract[] = j.data || [];
+      if (batch.length === 0) break;
+      all = all.concat(batch);
+      page += 1;
+    }
+    return all;
+  };
+
+  // Contexto de motonaves: agrega entregas recientes (ETD últimos 120 días)
+  // como evidencia de zarpe, por si los pedidos en tránsito ya se entregaron.
+  const fetchVesselContext = async (actives: Contract[]): Promise<Contract[]> => {
+    try {
+      const r = await fetch("/api/contracts?status=ENTREGADO AL CLIENTE&pageSize=300&page=1&sort_field=etd&sort_direction=desc");
+      if (!r.ok) return actives;
+      const j = await r.json();
+      const recent = ((j.data || []) as Contract[]).filter((c) => {
+        if (!c.etd) return false;
+        const d = new Date(c.etd.split("T")[0] + "T00:00:00");
+        return !isNaN(d.getTime()) && Date.now() - d.getTime() < 120 * 86400000;
+      });
+      return actives.concat(recent);
+    } catch {
+      return actives;
+    }
+  };
+
+  // ── Transformar con anexo: el informe sale SOLO con las filas del Excel ──
+  // Cruza cada fila por contrato cliente (fallback contrato China) contra el
+  // módulo, aplica motonave/fecha/nota del Excel como overrides del informe
+  // (sin tocar contratos) y descarta todo lo que no venga en el archivo.
+  const handleTransformWithFile = async (file: File) => {
+    setTransforming(true);
+    try {
+      const rows = await parseStatusProductionExcel(await file.arrayBuffer());
+      if (rows.length === 0) {
+        toast.error("El archivo no contiene filas de datos");
+        return;
+      }
+      const all = await fetchAllActive();
+      const byRef = new Map<string, Contract>();
+      const byCn = new Map<string, Contract>();
+      for (const c of all) {
+        if (c.client_contract) byRef.set(normKey(c.client_contract), c);
+        if (c.china_contract) byCn.set(normKey(c.china_contract), c);
+      }
+      const subset: Contract[] = [];
+      const seen = new Set<string>();
+      const overrides: Record<string, TransformOverride> = {};
+      const unmatched: string[] = [];
+      for (const r of rows) {
+        const c = (r.ref && byRef.get(normKey(r.ref))) || (r.cn && byCn.get(normKey(r.cn))) || null;
+        if (!c || !c.id) {
+          unmatched.push(r.ref || r.cn || "(sin contrato)");
+          continue;
+        }
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        subset.push(c);
+        const o: TransformOverride = {};
+        const vessel = (r.vessel || "").trim();
+        if (vessel && normKey(vessel) !== normKey(c.vessel_name)) o.vessel_name = vessel;
+        if (r.departureISO && r.departureISO !== (c.etd || "").split("T")[0]) o.etd = r.departureISO;
+        const returnedNote = (r.notes || "").trim();
+        const noteIsNew = returnedNote !== "" && returnedNote !== (c.notes || "").trim();
+        const noteParts = [noteIsNew ? returnedNote : null, r.departureText ? `Zarpe: ${r.departureText}` : null].filter(Boolean);
+        if (noteParts.length > 0) o.notes = noteParts.join(" · ");
+        if (o.vessel_name || o.etd || o.notes) overrides[c.id] = o;
+      }
+      if (subset.length === 0) {
+        toast.error("Ninguna fila del Excel cruzó con contratos del módulo — revisa los números de contrato");
+        return;
+      }
+      if (unmatched.length > 0) {
+        toast.warning(`${unmatched.length} fila${unmatched.length !== 1 ? "s" : ""} del Excel sin cruce (no van en el informe): ${unmatched.slice(0, 5).join(", ")}${unmatched.length > 5 ? "…" : ""}`);
+      }
+      // El contexto de motonaves sale del módulo completo, no solo del anexo
+      const vesselContext = await fetchVesselContext(all);
+      await handleTransform(overrides, subset, vesselContext);
+      toast.success(`Informe generado solo con las ${subset.length} filas del Excel anexado`);
+    } catch (err) {
+      console.error(err);
+      toast.error((err as Error).message || "No se pudo leer el archivo");
+    } finally {
+      setTransforming(false);
+      if (transformInputRef.current) transformInputRef.current.value = "";
+    }
+  };
+
+  const handleTransform = async (overridesArg?: Record<string, TransformOverride>, subsetArg?: Contract[], contextArg?: Contract[]) => {
+    // Overrides pasados directamente (Ignorar y transformar / anexo al transformar)
+    // o los que quedaron en memoria de un anexo previo no aplicado.
     const overrides = overridesArg ?? transformOverrides;
     setTransforming(true);
     try {
       toast.info("Generando reporte de reunión...");
-      const res = await fetch(
-        "/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=1&sort_field=client_name&sort_direction=asc"
-      );
-      if (!res.ok) throw new Error("Error al obtener contratos");
-      const json = await res.json();
-      let all: Contract[] = json.data || [];
-      // Paginar si hay más de 200
-      const total: number = json.count ?? all.length;
-      let page = 2;
-      while (all.length < total && page <= 10) {
-        const r = await fetch(
-          `/api/contracts?status=EN PRODUCCIÓN,EN TRÁNSITO&pageSize=200&page=${page}&sort_field=client_name&sort_direction=asc`
-        );
-        if (!r.ok) break;
-        const j = await r.json();
-        const batch: Contract[] = j.data || [];
-        if (batch.length === 0) break;
-        all = all.concat(batch);
-        page += 1;
-      }
+      // subsetArg: transformar SOLO las filas del Excel anexado; sin subset se
+      // transforma todo el módulo (producción + tránsito).
+      let all: Contract[] = subsetArg ?? (await fetchAllActive());
+      const vesselContext = contextArg ?? (await fetchVesselContext(subsetArg ? await fetchAllActive() : all));
 
       // Superponer los cambios ignorados (solo para esta transformación)
       if (overrides) {
@@ -351,7 +460,7 @@ export default function StatusProductionPage() {
         });
       }
 
-      const html = generateStatusMeetingHTML(all);
+      const html = generateStatusMeetingHTML(all, vesselContext);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
 
@@ -796,11 +905,11 @@ export default function StatusProductionPage() {
           <Button
             variant="outline"
             size="sm"
-            className="h-9 gap-1.5 rounded-xl border-slate-200"
+            className="h-9 w-9 p-0 rounded-xl border-slate-200"
             onClick={fetchContracts}
+            title="Actualizar la tabla desde el módulo de contratos"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            Refresh
           </Button>
 
           {pendingUpdates.length > 0 && (
@@ -852,59 +961,71 @@ export default function StatusProductionPage() {
             Anexar reporte
           </Button>
 
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-slate-200 bg-white h-9">
-            <label
-              htmlFor="file-number"
-              className="text-xs font-medium"
-              style={{ color: T.inkSoft }}
-              title="Número que aparecerá al inicio del nombre del archivo (ej. 04. STATUS PRODUCTION 23-04)"
-            >
-              N°
-            </label>
-            <input
-              id="file-number"
-              type="text"
-              inputMode="numeric"
-              maxLength={2}
-              value={fileNumber}
-              onChange={(e) => setFileNumber(e.target.value.replace(/\D/g, "").slice(0, 2))}
-              className="w-8 text-center text-sm font-semibold bg-transparent outline-none"
-              style={{ color: T.ink }}
-            />
-          </div>
-
           <Button
             size="sm"
             className="h-9 gap-1.5 rounded-xl"
-            onClick={() => handleTransform()}
+            onClick={() => setTransformDialog(true)}
             disabled={transforming}
-            title="Genera el resumen ejecutivo HTML para leer en la reunión"
+            title="Genera el resumen ejecutivo HTML para la reunión — puedes anexar el Excel exacto que quieres transformar"
             style={{ background: "linear-gradient(135deg, #0B72B8, #00B8E0)", border: "none", boxShadow: T.shadowMd, color: "white" }}
           >
             {transforming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Presentation className="w-3.5 h-3.5" />}
             Transformar reporte
           </Button>
 
-          <Button
-            size="sm"
-            className="h-9 gap-1.5 rounded-xl"
-            variant="outline"
-            onClick={handlePDF}
-            style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}
-          >
-            <FileDown className="w-3.5 h-3.5" />
-            Export PDF
-          </Button>
-
-          <Button
-            size="sm"
-            className="h-9 gap-1.5 rounded-xl"
-            onClick={handleExport}
-            style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}
-          >
-            <Download className="w-3.5 h-3.5" />
-            Export Excel
-          </Button>
+          <div className="relative">
+            <Button
+              size="sm"
+              className="h-9 gap-1.5 rounded-xl"
+              onClick={() => setExportMenu((v) => !v)}
+              style={{ background: T.gradientPrimary, border: "none", boxShadow: T.shadowMd, color: "white" }}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Exportar
+            </Button>
+            {exportMenu && (
+              <div
+                style={{
+                  position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 40,
+                  background: "#fff", border: `1px solid ${T.borderLight}`, borderRadius: 14,
+                  boxShadow: T.shadowMd, padding: 8, minWidth: 200,
+                }}
+              >
+                <div className="flex items-center gap-2 px-2 py-1.5" style={{ borderBottom: `1px solid ${T.borderLight}`, marginBottom: 4 }}>
+                  <label htmlFor="file-number" className="text-xs font-medium" style={{ color: T.inkSoft }}
+                    title="Número que aparecerá al inicio del nombre del archivo (ej. 04. STATUS PRODUCTION 23-04)">
+                    N° de archivo
+                  </label>
+                  <input
+                    id="file-number"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={fileNumber}
+                    onChange={(e) => setFileNumber(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                    className="w-8 text-center text-sm font-semibold bg-transparent outline-none rounded border border-slate-200"
+                    style={{ color: T.ink }}
+                  />
+                </div>
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm font-medium hover:bg-slate-50"
+                  style={{ color: T.ink }}
+                  onClick={() => { setExportMenu(false); handleExport(); }}
+                >
+                  <Download className="w-3.5 h-3.5" style={{ color: T.accent }} />
+                  Excel (.xlsx)
+                </button>
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm font-medium hover:bg-slate-50"
+                  style={{ color: T.ink }}
+                  onClick={() => { setExportMenu(false); handlePDF(); }}
+                >
+                  <FileDown className="w-3.5 h-3.5" style={{ color: T.accent }} />
+                  PDF
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1048,6 +1169,65 @@ export default function StatusProductionPage() {
 
       {/* ── Vista previa del reporte anexado ──
           Portal al body: los ancestros animados (transform) rompen position:fixed */}
+      {/* Diálogo: transformar con anexo o todo el módulo */}
+      <input
+        ref={transformInputRef}
+        type="file"
+        accept=".xlsx,.xlsm,.xls"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) { setTransformDialog(false); handleTransformWithFile(f); }
+        }}
+      />
+      {transformDialog && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(6,27,46,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={() => setTransformDialog(false)}>
+          <div style={{ background: "#fff", borderRadius: 18, boxShadow: T.shadowMd, maxWidth: 480, width: "100%", overflow: "hidden" }}
+            onClick={(e) => e.stopPropagation()}>
+            <div style={{ padding: "16px 22px", background: T.gradientPrimary }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>Transformar reporte</div>
+              <div style={{ fontSize: 11.5, color: "rgba(207,224,240,0.85)", marginTop: 2 }}>
+                ¿Qué información quieres en el informe de reunión?
+              </div>
+            </div>
+            <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                className="w-full flex items-start gap-3 p-3 rounded-xl border text-left hover:bg-slate-50"
+                style={{ borderColor: "#00B8E0" }}
+                onClick={() => transformInputRef.current?.click()}
+              >
+                <Upload className="w-4 h-4 mt-0.5" style={{ color: "#0089A8" }} />
+                <span>
+                  <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: T.ink }}>Anexar el Excel a transformar (recomendado)</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: T.inkMuted, marginTop: 2 }}>
+                    El informe sale solo con las filas de tu archivo, cruzadas con el módulo de contratos. Nada más se cuela.
+                  </span>
+                </span>
+              </button>
+              <button
+                className="w-full flex items-start gap-3 p-3 rounded-xl border border-slate-200 text-left hover:bg-slate-50"
+                onClick={() => { setTransformDialog(false); handleTransform(); }}
+              >
+                <Presentation className="w-4 h-4 mt-0.5" style={{ color: T.accent }} />
+                <span>
+                  <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: T.ink }}>Transformar todo el módulo</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: T.inkMuted, marginTop: 2 }}>
+                    Incluye todos los contratos EN PRODUCCIÓN y EN TRÁNSITO registrados en IBC Core.
+                  </span>
+                </span>
+              </button>
+            </div>
+            <div style={{ padding: "0 22px 16px", display: "flex", justifyContent: "flex-end" }}>
+              <Button variant="outline" size="sm" className="h-8 rounded-xl" onClick={() => setTransformDialog(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {importPreview && typeof document !== "undefined" && createPortal(
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div
@@ -1067,6 +1247,7 @@ export default function StatusProductionPage() {
                 <div style={{ fontSize: 11.5, color: "rgba(207,224,240,0.85)", marginTop: 2 }}>
                   {importPreview.changes.length} embarque{importPreview.changes.length !== 1 ? "s" : ""} con novedades
                   {importPreview.unmatched.length > 0 && ` · ${importPreview.unmatched.length} fila${importPreview.unmatched.length !== 1 ? "s" : ""} sin cruce`}
+                  {" · a contratos solo van motonave y fecha de zarpe; las notas, solo al informe"}
                 </div>
               </div>
               <button
@@ -1159,10 +1340,11 @@ export default function StatusProductionPage() {
                 className="h-9 gap-1.5 rounded-xl"
                 onClick={handleConfirmImport}
                 disabled={importing}
+                title="A los contratos solo van motonave y fecha de zarpe — las notas se incluyen únicamente en el reporte de reunión"
                 style={{ background: T.success, border: "none", color: "white" }}
               >
                 {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ship className="w-3.5 h-3.5" />}
-                Aplicar cambios ({importPreview.changes.length})
+                Aplicar cambios ({importPreview.changes.filter((c) => c.vesselTo || c.etdTo).length})
               </Button>
             </div>
           </div>

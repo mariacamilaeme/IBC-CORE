@@ -15,14 +15,19 @@ interface ColumnSelectorProps {
   title?: string;
   generating?: boolean;
   buttonLabel?: string;
+  /** dataKeys pre-seleccionados al abrir; si se omite, se seleccionan todas */
+  defaultSelected?: string[];
 }
 
-export default function ColumnSelector({ open, onClose, allColumns, onGenerate, title = "Seleccionar columnas", generating, buttonLabel = "PDF" }: ColumnSelectorProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(allColumns.map((c) => c.dataKey)));
+export default function ColumnSelector({ open, onClose, allColumns, onGenerate, title = "Seleccionar columnas", generating, buttonLabel = "PDF", defaultSelected }: ColumnSelectorProps) {
+  const initialSelection = () =>
+    new Set(defaultSelected ?? allColumns.map((c) => c.dataKey));
+  const [selected, setSelected] = useState<Set<string>>(initialSelection);
 
   // Reset selection when modal opens
   useEffect(() => {
-    if (open) setSelected(new Set(allColumns.map((c) => c.dataKey)));
+    if (open) setSelected(new Set(defaultSelected ?? allColumns.map((c) => c.dataKey)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, allColumns]);
 
   if (!open) return null;

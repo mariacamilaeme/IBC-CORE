@@ -214,9 +214,14 @@ async function buildWorkbook(commercialName: string, rowsRaw: Contract[]) {
     const groupShipped = group.reduce((s, c) => s + (c.tons_shipped ?? 0), 0);
     const groupPending = group.reduce((s, c) => s + (c.pending_client_amount ?? 0), 0);
 
+    // Los ENTREGADOS van ocultos: siguen en el archivo (se pueden mostrar
+    // desde Excel con "Mostrar filas") pero no estorban en la lectura.
+    const isHiddenGroup = statusKey === "ENTREGADO AL CLIENTE";
+
     // SECTION HEADER ROW — banda con color del status
     const sectionRow = ws.addRow([""]);
     sectionRow.height = 28;
+    sectionRow.hidden = isHiddenGroup;
     const sectionCell = ws.getCell(`A${sectionRow.number}`);
     sectionCell.value = {
       richText: [
@@ -331,11 +336,13 @@ async function buildWorkbook(commercialName: string, rowsRaw: Contract[]) {
       }
     });
     row.height = 26;
+    row.hidden = isHiddenGroup;
     }); // end group.forEach
 
     // SUBTOTAL del grupo
     const subRow = ws.addRow([]);
     subRow.height = 22;
+    subRow.hidden = isHiddenGroup;
     for (let col = 1; col <= totalCols; col++) {
       const cell = subRow.getCell(col);
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: st.bg } };
@@ -373,6 +380,7 @@ async function buildWorkbook(commercialName: string, rowsRaw: Contract[]) {
     // Pequeño espacio entre secciones
     const gap = ws.addRow([""]);
     gap.height = 6;
+    gap.hidden = isHiddenGroup;
     for (let col = 1; col <= totalCols; col++) {
       gap.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
     }
@@ -570,6 +578,7 @@ export default function StatusCommercialReportPage() {
         src.eachRow({ includeEmpty: true }, (row, rowNumber) => {
           const newRow = dst.getRow(rowNumber);
           newRow.height = row.height;
+          newRow.hidden = row.hidden;
           row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
             const nc = newRow.getCell(colNumber);
             nc.value = cell.value;

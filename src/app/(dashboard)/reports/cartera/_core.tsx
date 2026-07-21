@@ -89,6 +89,7 @@ export interface CarteraData {
   activeFilterCount: number; clearAllFilters: () => void;
   rows: Row[]; kpis: Kpis; aging: Aging; groups: Group[];
   fetchData: () => void; handleDownloadPDF: () => void; handleDownloadExcel: () => void;
+  handleDownloadExcelPorCliente: () => void;
 }
 
 export function useCarteraData(): CarteraData {
@@ -226,9 +227,9 @@ export function useCarteraData(): CarteraData {
   };
 
   // -------- Excel --------
-  const handleDownloadExcel = async () => {
-    try {
-      toast.info("Generando Excel de cartera...");
+  // Constructor reutilizable: recibe los grupos/kpis/aging a pintar, de modo
+  // que sirve para el reporte completo o para el archivo de UN solo cliente.
+  const buildCarteraExcelBlob = async (gs: Group[], k: Kpis, ag: Aging): Promise<Blob> => {
       const excelMod = await import("exceljs");
       const ExcelJS = excelMod.default || excelMod;
       const wb = new ExcelJS.Workbook();
@@ -244,7 +245,7 @@ export function useCarteraData(): CarteraData {
       const totalCols = 6;
       const now = new Date();
       const dateStr = now.toLocaleDateString("es-CO", { year: "numeric", month: "long", day: "numeric" });
-      const singleClient = groups.length === 1 ? groups[0].client : null;
+      const singleClient = gs.length === 1 ? gs[0].client : null;
 
       // ROW 1 — Hero band (deep navy, gold baseline). Cliente protagonista cuando es uno solo.
       const r1 = ws.addRow([""]); r1.height = 60;
@@ -252,7 +253,7 @@ export function useCarteraData(): CarteraData {
         { text: "                                  ", font: { name: FONT, size: 18, color: { argb: NAVY_DEEP } } },
         { text: "REPORTE DE CARTERA", font: { name: FONT, size: 16, bold: true, color: { argb: WHITE } } },
         ...(singleClient ? [{ text: `      ${singleClient}`, font: { name: FONT, size: 16, bold: true, color: { argb: GOLD } } }] : []),
-        { text: `      ${dateStr}  ·  ${kpis.ops} operaciones${singleClient ? "" : `  ·  ${kpis.clientes} clientes`}`, font: { name: FONT, size: 9.5, color: { argb: "AFC6E0" } } },
+        { text: `      ${dateStr}  ·  ${k.ops} operaciones${singleClient ? "" : `  ·  ${k.clientes} clientes`}`, font: { name: FONT, size: 9.5, color: { argb: "AFC6E0" } } },
       ] };
       ws.getCell("A1").alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       for (let col = 1; col <= totalCols; col++) { const cell = r1.getCell(col); cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY_DEEP } }; cell.border = { bottom: { style: "thick", color: { argb: GOLD } } }; }
@@ -263,7 +264,7 @@ export function useCarteraData(): CarteraData {
       ws.mergeCells(2, 1, 2, totalCols);
       ws.getCell("A2").value = { richText: [
         { text: "CARTERA TOTAL POR COBRAR       ", font: { name: FONT, size: 10, bold: true, color: { argb: INK_LIGHT } } },
-        { text: fmtMoney(kpis.total), font: { name: FONT, size: 26, bold: true, color: { argb: NAVY } } },
+        { text: fmtMoney(k.total), font: { name: FONT, size: 26, bold: true, color: { argb: NAVY } } },
         { text: "   USD", font: { name: FONT, size: 11, color: { argb: INK_LIGHT } } },
       ] };
       ws.getCell("A2").alignment = { horizontal: "left", vertical: "middle", indent: 1 };
@@ -274,9 +275,9 @@ export function useCarteraData(): CarteraData {
       ws.mergeCells(3, 1, 3, totalCols);
       ws.getCell("A3").value = { richText: [
         { text: "Atrasado  ", font: { name: FONT, size: 10, color: { argb: INK_LIGHT } } },
-        { text: `${fmtMoney(kpis.montoAtrasado)} · ${kpis.atrasadas} ops`, font: { name: FONT, size: 10.5, bold: true, color: { argb: RED } } },
+        { text: `${fmtMoney(k.montoAtrasado)} · ${k.atrasadas} ops`, font: { name: FONT, size: 10.5, bold: true, color: { argb: RED } } },
         { text: "          Por vencer  ", font: { name: FONT, size: 10, color: { argb: INK_LIGHT } } },
-        { text: `${fmtMoney(kpis.montoPorVencer)} · ${kpis.aTiempo + kpis.adelantadas} ops`, font: { name: FONT, size: 10.5, bold: true, color: { argb: GREEN } } },
+        { text: `${fmtMoney(k.montoPorVencer)} · ${k.aTiempo + k.adelantadas} ops`, font: { name: FONT, size: 10.5, bold: true, color: { argb: GREEN } } },
       ] };
       ws.getCell("A3").alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       for (let col = 1; col <= totalCols; col++) r3.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: PAPER } };
@@ -286,7 +287,7 @@ export function useCarteraData(): CarteraData {
       ws.mergeCells(4, 1, 4, totalCols);
       ws.getCell("A4").value = { richText: [
         { text: "Antigüedad   ", font: { name: FONT, size: 9, bold: true, color: { argb: INK_LIGHT } } },
-        { text: `Por vencer ${fmtMoneyShort(aging.porVencer.amt)}    ·    0–30 d ${fmtMoneyShort(aging.d0_30.amt)}    ·    31–60 d ${fmtMoneyShort(aging.d31_60.amt)}    ·    +60 d ${fmtMoneyShort(aging.d60.amt)}${aging.sinFecha.amt > 0 ? `    ·    Sin fecha ${fmtMoneyShort(aging.sinFecha.amt)}` : ""}`, font: { name: FONT, size: 9.5, color: { argb: INK_SOFT } } },
+        { text: `Por vencer ${fmtMoneyShort(ag.porVencer.amt)}    ·    0–30 d ${fmtMoneyShort(ag.d0_30.amt)}    ·    31–60 d ${fmtMoneyShort(ag.d31_60.amt)}    ·    +60 d ${fmtMoneyShort(ag.d60.amt)}${ag.sinFecha.amt > 0 ? `    ·    Sin fecha ${fmtMoneyShort(ag.sinFecha.amt)}` : ""}`, font: { name: FONT, size: 9.5, color: { argb: INK_SOFT } } },
       ] };
       ws.getCell("A4").alignment = { horizontal: "left", vertical: "middle", indent: 1 };
       for (let col = 1; col <= totalCols; col++) { const cell = r4.getCell(col); cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PAPER } }; cell.border = { bottom: { style: "thin", color: { argb: LINE } } }; }
@@ -305,7 +306,7 @@ export function useCarteraData(): CarteraData {
       });
 
       let stripe = 0;
-      for (const g of groups) {
+      for (const g of gs) {
         // Group header row per cliente — se omite cuando el reporte es de un solo cliente
         // (ya aparece destacado en el encabezado superior).
         if (!singleClient) {
@@ -343,7 +344,7 @@ export function useCarteraData(): CarteraData {
         }
       }
 
-      const tr = ws.addRow(["TOTAL CARTERA", "", kpis.total, "", "", ""]);
+      const tr = ws.addRow(["TOTAL CARTERA", "", k.total, "", "", ""]);
       ws.mergeCells(tr.number, 1, tr.number, 2);
       for (let col = 1; col <= totalCols; col++) {
         const cell = tr.getCell(col);
@@ -369,18 +370,79 @@ export function useCarteraData(): CarteraData {
 
       ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
       const buffer = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a"); link.href = url; link.download = `Reporte_Cartera_IBC_${now.toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
+      return new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url; link.download = filename;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+
+  const handleDownloadExcel = async () => {
+    try {
+      toast.info("Generando Excel de cartera...");
+      const blob = await buildCarteraExcelBlob(groups, kpis, aging);
+      downloadBlob(blob, `Reporte_Cartera_IBC_${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success("Excel descargado");
     } catch (e) { console.error(e); toast.error("Error al generar el Excel"); }
+  };
+
+  // -------- Excel por cliente: un archivo .xlsx por cada cliente en la vista --------
+  const kpisOf = (items: Row[]): Kpis => {
+    let total = 0, montoAtrasado = 0, montoATiempo = 0, montoAdelantado = 0, montoSinFecha = 0;
+    let atrasadas = 0, aTiempo = 0, adelantadas = 0, sinFecha = 0;
+    for (const r of items) {
+      const a = r.c.pending_client_amount ?? 0; total += a;
+      if (r.estado === "ATRASADO") { atrasadas++; montoAtrasado += a; }
+      else if (r.estado === "A_TIEMPO") { aTiempo++; montoATiempo += a; }
+      else if (r.estado === "ADELANTADO") { adelantadas++; montoAdelantado += a; }
+      else { sinFecha++; montoSinFecha += a; }
+    }
+    return { total, ops: items.length, clientes: 1, atrasadas, aTiempo, adelantadas, sinFecha, montoAtrasado, montoATiempo, montoAdelantado, montoSinFecha, montoPorVencer: montoATiempo + montoAdelantado };
+  };
+
+  const agingOf = (items: Row[]): Aging => {
+    const b: Aging = { porVencer: { amt: 0, n: 0 }, d0_30: { amt: 0, n: 0 }, d31_60: { amt: 0, n: 0 }, d60: { amt: 0, n: 0 }, sinFecha: { amt: 0, n: 0 } };
+    for (const r of items) {
+      const a = r.c.pending_client_amount ?? 0;
+      if (r.estado === "SIN_FECHA") { b.sinFecha.amt += a; b.sinFecha.n++; continue; }
+      const days = r.days ?? 0;
+      if (days >= 0) { b.porVencer.amt += a; b.porVencer.n++; }
+      else { const od = -days; if (od <= 30) { b.d0_30.amt += a; b.d0_30.n++; } else if (od <= 60) { b.d31_60.amt += a; b.d31_60.n++; } else { b.d60.amt += a; b.d60.n++; } }
+    }
+    return b;
+  };
+
+  const handleDownloadExcelPorCliente = async () => {
+    if (groups.length === 0) { toast.info("No hay clientes en la vista actual"); return; }
+    toast.info(`Generando ${groups.length} archivo${groups.length !== 1 ? "s" : ""} de Excel — uno por cliente...`);
+    const hoy = new Date();
+    const dateTag = `${String(hoy.getDate()).padStart(2, "0")}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
+    let done = 0;
+    try {
+      for (const g of groups) {
+        const blob = await buildCarteraExcelBlob([g], kpisOf(g.items), agingOf(g.items));
+        const safe = g.client.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 45);
+        downloadBlob(blob, `REPORTE CARTERA ${safe} ${dateTag}.xlsx`);
+        done++;
+        // pausa breve entre descargas para que el navegador no las bloquee
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
+      toast.success(`${done} archivo${done !== 1 ? "s" : ""} descargado${done !== 1 ? "s" : ""} — uno por cliente`, {
+        description: "Si el navegador pregunta, permite las descargas múltiples.",
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error(`Error generando los archivos (${done} de ${groups.length} descargados)`);
+    }
   };
 
   return {
     loading, today, searchQuery, setSearchQuery, filterClient, setFilterClient, filterStatus, setFilterStatus,
     filterEstado, setFilterEstado, filterOptions, activeFilterCount, clearAllFilters,
-    rows, kpis, aging, groups, fetchData, handleDownloadPDF, handleDownloadExcel,
+    rows, kpis, aging, groups, fetchData, handleDownloadPDF, handleDownloadExcel, handleDownloadExcelPorCliente,
   };
 }
 

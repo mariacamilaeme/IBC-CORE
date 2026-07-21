@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
       client_name: "client_name",
       detail: "detail",
       tons_agreed: "tons_agreed",
+      vessel_name: "vessel_name",
       incoterm: "incoterm",
       status: "status",
       eta_final: "eta_final",
