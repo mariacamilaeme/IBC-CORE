@@ -5,8 +5,9 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Download, Loader2, Factory, RefreshCw, FileDown, Presentation, Ship, Upload, X } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { cn, displayContract } from "@/lib/utils";
 import { generatePDFReport } from "@/lib/pdf-report";
-import { generateStatusMeetingHTML } from "@/lib/html-status-meeting";
+import { generateStatusMeetingHTML, type MeetingInvoice } from "@/lib/html-status-meeting";
 import { parseStatusProductionExcel } from "@/lib/status-production-import";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
@@ -446,6 +447,21 @@ export default function StatusProductionPage() {
       let all: Contract[] = subsetArg ?? (await fetchAllActive());
       const vesselContext = contextArg ?? (await fetchVesselContext(subsetArg ? await fetchAllActive() : all));
 
+      // Facturas China del módulo de facturación — para marcar en el reporte
+      // los pedidos cuya factura ya fue compartida (aunque sigan en producción).
+      // Si falla, el reporte sale igual sin ese cruce.
+      const invoices: MeetingInvoice[] = [];
+      try {
+        for (let page = 1; page <= 20; page++) {
+          const r = await fetch(`/api/contract-invoices?pageSize=200&page=${page}`);
+          if (!r.ok) break;
+          const j = await r.json();
+          const rows = j.data || [];
+          invoices.push(...rows);
+          if (rows.length < 200) break;
+        }
+      } catch { /* sin cruce de facturas */ }
+
       // Superponer los cambios ignorados (solo para esta transformación)
       if (overrides) {
         all = all.map((c) => {
@@ -460,7 +476,7 @@ export default function StatusProductionPage() {
         });
       }
 
-      const html = generateStatusMeetingHTML(all, vesselContext);
+      const html = generateStatusMeetingHTML(all, vesselContext, invoices);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
 
@@ -585,6 +601,7 @@ export default function StatusProductionPage() {
         { key: "incoterm", width: 13 },
         { key: "detail", width: 40 },
         { key: "exw_date", width: 15 },
+        { key: "delivery_date_pcc", width: 17 },
         { key: "vessel_name", width: 22 },
         { key: "estimated_departure", width: 26 },
         { key: "additional_notes", width: 35 },
@@ -634,6 +651,7 @@ export default function StatusProductionPage() {
         "INCOTERM",
         "DETAIL",
         "EXW",
+        "PRODUCTION DELIVERY",
         "VESSEL NAME",
         "ESTIMATED DEPARTURE DATE",
         "ADDITIONAL NOTES",
@@ -670,11 +688,12 @@ export default function StatusProductionPage() {
 
         const row = ws.addRow([
           c.client_name || "",
-          c.client_contract || "",
+          displayContract(c, ""),
           c.china_contract || "",
           c.incoterm || "",
           c.detail || "",
           fmtDate(c.exw_date),
+          fmtDate(c.delivery_date_pcc),
           vesselVal,
           departureVal,
           notesVal,
@@ -846,6 +865,7 @@ export default function StatusProductionPage() {
           { header: "INCOTERM", dataKey: "incoterm", width: 0.6, halign: "center" },
           { header: "DETAIL", dataKey: "detail", width: 2 },
           { header: "EXW", dataKey: "exw", width: 0.8, halign: "center" },
+          { header: "PROD. DELIVERY", dataKey: "prod_delivery", width: 0.9, halign: "center" },
           { header: "VESSEL NAME", dataKey: "vessel", width: 1.1 },
           { header: "EST. DEPARTURE", dataKey: "departure", width: 0.9, halign: "center" },
           { header: "ADDITIONAL NOTES", dataKey: "notes", width: 1.5 },
@@ -854,11 +874,12 @@ export default function StatusProductionPage() {
           const manual = manualData[c.id || ""] || { vessel_name: "", estimated_departure: "", additional_notes: "" };
           return {
             customer: c.client_name || "",
-            customer_contract: c.client_contract || "",
+            customer_contract: displayContract(c, ""),
             china_contract: c.china_contract || "",
             incoterm: c.incoterm || "",
             detail: c.detail || "",
             exw: fmtDate(c.exw_date),
+            prod_delivery: fmtDate(c.delivery_date_pcc),
             vessel: manual.vessel_name || c.vessel_name || "",
             departure: manual.estimated_departure ? fmtDate(manual.estimated_departure) : fmtDate(c.etd),
             notes: manual.additional_notes || "",
@@ -1068,6 +1089,9 @@ export default function StatusProductionPage() {
                   <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap text-center">
                     EXW
                   </TableHead>
+                  <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }} className="whitespace-nowrap text-center">
+                    PROD. DELIVERY
+                  </TableHead>
                   {/* Editable columns - highlighted header */}
                   <TableHead style={{ fontSize: 11, fontWeight: 700, color: T.accent, textTransform: "uppercase", letterSpacing: "0.05em", background: "rgba(11,83,148,0.06)" }} className="whitespace-nowrap">
                     VESSEL NAME
@@ -1094,7 +1118,7 @@ export default function StatusProductionPage() {
                     </TableCell>
                     {/* B: CONTRATO CLIENTE */}
                     <TableCell className="text-xs font-medium text-[#1E3A5F] whitespace-nowrap">
-                      {c.client_contract || ""}
+                      {displayContract(c, "")}
                     </TableCell>
                     {/* C: CONTRATO CHINA */}
                     <TableCell className="text-xs font-medium text-[#1E3A5F] whitespace-nowrap">
@@ -1112,6 +1136,11 @@ export default function StatusProductionPage() {
                     <TableCell className="text-xs text-center text-slate-600 whitespace-nowrap">
                       {fmtDate(c.exw_date)}
                     </TableCell>
+                    {/* F2: ENTREGA PRODUCCIÓN */}
+                    <TableCell className="text-xs text-center font-medium text-[#1E3A5F] whitespace-nowrap">
+                      {fmtDate(c.delivery_date_pcc)}
+                    </TableCell>
+                    
                     {/* G: VESSEL NAME (editable) */}
                     <TableCell className="p-1 bg-blue-50/40">
                       <input

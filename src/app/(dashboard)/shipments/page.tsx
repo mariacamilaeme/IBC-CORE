@@ -35,12 +35,13 @@ import {
   Pencil,
   Check,
   ExternalLink,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
-import { cn, formatDate, formatCurrency, formatNumber, SHIPMENT_STATUS_LABELS, CONTRACT_STATUS_COLORS, CONTRACT_STATUS_LABELS } from "@/lib/utils";
+import { cn, formatDate, formatCurrency, formatNumber, displayContract, isBlReleased, SHIPMENT_STATUS_LABELS, CONTRACT_STATUS_COLORS, CONTRACT_STATUS_LABELS } from "@/lib/utils";
 import type {
   Shipment,
   ShipmentStatus,
@@ -100,6 +101,7 @@ import Link from "next/link";
 
 // ─── DESIGN TOKENS ───────────────────────────────────────────
 import { T } from "@/lib/design-tokens";
+import { buildVesselLabels } from "@/lib/vessel-voyages";
 import { getDirectContainerTrackingUrl, getDirectVesselTrackingUrl } from "@/lib/shipping-tracking";
 
 // ─── SVG ICONS ───────────────────────────────────────────────
@@ -407,8 +409,8 @@ function ContractSplitPanel({ contract: c, onClose }: { contract: Contract; onCl
             <FRow label="Tipo embarque" value={c.shipment_type} />
             <FRow
               label="Liberación BL"
-              value={c.bl_released === "SI" ? "Liberado" : "Pendiente"}
-              color={c.bl_released === "SI" ? T.success : T.danger}
+              value={isBlReleased(c.bl_released) ? "Liberado" : "Pendiente"}
+              color={isBlReleased(c.bl_released) ? T.success : T.danger}
               strong
             />
           </Section>
@@ -676,16 +678,23 @@ export default function ShipmentsPage() {
 
   const yearLabel = selectedYears.length === 0 ? "Todos" : [...selectedYears].sort().join(", ");
 
+  // Etiquetas de viaje: una motonave que regresa meses después con el mismo
+  // nombre se separa en "NOMBRE · VIAJE 2" según la brecha entre ETAs.
+  const voyageLabels = useMemo(() => buildVesselLabels(vesselContracts), [vesselContracts]);
+  const vesselKeyOf = useCallback((c: Contract) =>
+    (c.id && voyageLabels.get(c.id)) || c.vessel_name?.trim().toUpperCase() || "SIN MOTONAVE",
+    [voyageLabels]);
+
   const contractsByVessel = useMemo(() => {
     const groups: Record<string, Contract[]> = {};
     vesselContracts.forEach((c) => {
-      const vessel = c.vessel_name?.trim().toUpperCase() || "SIN MOTONAVE";
+      const vessel = vesselKeyOf(c);
       if (!groups[vessel]) groups[vessel] = [];
       groups[vessel].push(c);
     });
     // Sort by vessel name
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [vesselContracts]);
+  }, [vesselContracts, vesselKeyOf]);
 
   // Vessel tab: filter options derived from loaded data
   const vfOptions = useMemo(() => {
@@ -693,23 +702,23 @@ export default function ShipmentsPage() {
       [...new Set(arr.filter((v): v is string => !!v && v.trim() !== ""))].sort();
     return {
       client_names: unique(vesselContracts.map((c) => c.client_name)),
-      vessel_names: unique(vesselContracts.map((c) => c.vessel_name?.trim().toUpperCase())),
+      vessel_names: unique(vesselContracts.map((c) => vesselKeyOf(c))),
       arrival_ports: unique(vesselContracts.map((c) => c.arrival_port)),
       eta_dates: unique(vesselContracts.map((c) => c.eta_final)),
     };
-  }, [vesselContracts]);
+  }, [vesselContracts, vesselKeyOf]);
 
   const vesselKpis = useMemo(() => {
     const vesselEnTransito = new Set(
       vesselContracts
         .filter((c) => c.status === "EN TRÁNSITO")
-        .map((c) => c.vessel_name?.trim().toUpperCase())
+        .map((c) => vesselKeyOf(c))
         .filter(Boolean)
     );
     const vesselPendienteEmbarque = new Set(
       vesselContracts
         .filter((c) => c.status === "EN PRODUCCIÓN" || c.status === "PENDIENTE ANTICIPO")
-        .map((c) => c.vessel_name?.trim().toUpperCase())
+        .map((c) => vesselKeyOf(c))
         .filter(Boolean)
     );
     const toneladasEnTransito = vesselContracts
@@ -719,7 +728,7 @@ export default function ShipmentsPage() {
       (sum, c) => sum + (c.pending_client_amount ?? 0), 0
     );
     const blPendientes = vesselContracts.filter(
-      (c) => c.bl_released !== "SI" && c.status !== "ENTREGADO AL CLIENTE"
+      (c) => !isBlReleased(c.bl_released) && c.status !== "ENTREGADO AL CLIENTE"
     ).length;
     const contratosSaldoPendiente = vesselContracts.filter(
       (c) => (c.pending_client_amount ?? 0) > 0
@@ -727,7 +736,7 @@ export default function ShipmentsPage() {
     // Motonaves EN TRÁNSITO sin actualización reciente
     const groupsForStale: Record<string, Contract[]> = {};
     vesselContracts.forEach((c) => {
-      const vessel = c.vessel_name?.trim().toUpperCase() || "SIN MOTONAVE";
+      const vessel = vesselKeyOf(c);
       if (!groupsForStale[vessel]) groupsForStale[vessel] = [];
       groupsForStale[vessel].push(c);
     });
@@ -741,7 +750,7 @@ export default function ShipmentsPage() {
       contratosSaldoPendiente,
       porActualizar,
     };
-  }, [vesselContracts]);
+  }, [vesselContracts, vesselKeyOf]);
 
   // Apply KPI filter + popover filters + search
   const filteredContractsByVessel = useMemo(() => {
@@ -765,7 +774,7 @@ export default function ShipmentsPage() {
 
     if (vfClient.length) filtered = filtered.filter((c) => vfClient.includes(c.client_name));
     if (vfStatus.length) filtered = filtered.filter((c) => vfStatus.includes(c.status || ""));
-    if (vfVessel.length) filtered = filtered.filter((c) => vfVessel.includes(c.vessel_name?.trim().toUpperCase() || ""));
+    if (vfVessel.length) filtered = filtered.filter((c) => vfVessel.includes(vesselKeyOf(c)));
     if (vfPort.length) filtered = filtered.filter((c) => vfPort.includes(c.arrival_port || ""));
     if (vfEta.length) filtered = filtered.filter((c) => vfEta.includes(c.eta_final || ""));
     if (vfSaldo.length) {
@@ -778,16 +787,16 @@ export default function ShipmentsPage() {
     }
     if (vfBlReleased.length) {
       filtered = filtered.filter((c) => {
-        if (vfBlReleased.includes("SI") && c.bl_released === "SI") return true;
-        if (vfBlReleased.includes("NO") && c.bl_released !== "SI") return true;
+        if (vfBlReleased.includes("SI") && isBlReleased(c.bl_released)) return true;
+        if (vfBlReleased.includes("NO") && !isBlReleased(c.bl_released)) return true;
         return false;
       });
     }
 
-    // Group filtered contracts by vessel
+    // Group filtered contracts by vessel (viaje incluido en la clave)
     const groups: Record<string, Contract[]> = {};
     filtered.forEach((c) => {
-      const vessel = c.vessel_name?.trim().toUpperCase() || "SIN MOTONAVE";
+      const vessel = vesselKeyOf(c);
       if (!groups[vessel]) groups[vessel] = [];
       groups[vessel].push(c);
     });
@@ -824,7 +833,7 @@ export default function ShipmentsPage() {
           case "saldo_pendiente":
             return contracts.some((c) => (c.pending_client_amount ?? 0) > 0);
           case "bl_pendientes":
-            return contracts.some((c) => c.bl_released !== "SI" && c.status !== "ENTREGADO AL CLIENTE");
+            return contracts.some((c) => !isBlReleased(c.bl_released) && c.status !== "ENTREGADO AL CLIENTE");
           case "por_actualizar":
             return getVesselUpdateSignal(contracts) !== null;
           default:
@@ -833,7 +842,7 @@ export default function ShipmentsPage() {
       });
     }
     return result;
-  }, [vesselContracts, vesselFilter, vesselSearch, vfClient, vfStatus, vfVessel, vfPort, vfEta, vfSaldo, vfBlReleased]);
+  }, [vesselContracts, vesselFilter, vesselSearch, vfClient, vfStatus, vfVessel, vfPort, vfEta, vfSaldo, vfBlReleased, vesselKeyOf]);
 
   // =====================================================
   // Form
@@ -1215,10 +1224,17 @@ export default function ShipmentsPage() {
     setVesselDateStatus("");
   };
 
-  const saveVesselDates = async (vesselName: string) => {
+  // vesselLabel: clave del grupo en pantalla (puede incluir "· VIAJE 2").
+  // groupContracts: contratos de ESE viaje — la actualización se restringe a
+  // ellos vía contract_ids para no tocar otros viajes de la misma motonave.
+  const saveVesselDates = async (vesselLabel: string, groupContracts: Contract[]) => {
     setVesselDateSaving(true);
     try {
-      const payload: Record<string, unknown> = { vessel_name: vesselName };
+      const realName = groupContracts.find((c) => c.vessel_name?.trim())?.vessel_name?.trim() || vesselLabel;
+      const payload: Record<string, unknown> = {
+        vessel_name: realName,
+        contract_ids: groupContracts.map((c) => c.id).filter(Boolean),
+      };
       payload.etd = vesselDateEtd || null;
       payload.eta_initial = vesselDateEtaInitial || null;
       payload.eta_final = vesselDateEtaFinal || null;
@@ -1240,7 +1256,7 @@ export default function ShipmentsPage() {
       cancelVesselDateEdit();
 
       // Update dialog data immediately so user sees changes without closing
-      if (vesselDetailData && vesselDetailData.name === vesselName) {
+      if (vesselDetailData && vesselDetailData.name === vesselLabel) {
         const updatedContracts = vesselDetailData.contracts.map((c) => ({
           ...c,
           etd: vesselDateEtd || null,
@@ -1248,7 +1264,7 @@ export default function ShipmentsPage() {
           eta_final: vesselDateEtaFinal || null,
           ...(vesselDateStatus ? { status: vesselDateStatus as Contract["status"] } : {}),
         }));
-        setVesselDetailData({ name: vesselName, contracts: updatedContracts });
+        setVesselDetailData({ name: vesselLabel, contracts: updatedContracts });
       }
 
       // Also refresh the background data
@@ -3166,7 +3182,7 @@ export default function ShipmentsPage() {
         const vdShippingCo = vdContracts.find((c) => c.shipping_company)?.shipping_company;
         const vdTotalTons = vdContracts.reduce((s, c) => s + (c.tons_shipped ?? c.tons_agreed ?? 0), 0);
         const vdTotalPending = vdContracts.reduce((s, c) => s + (c.pending_client_amount ?? 0), 0);
-        const vdBlLiberated = vdContracts.filter((c) => c.bl_released === "SI").length;
+        const vdBlLiberated = vdContracts.filter((c) => isBlReleased(c.bl_released)).length;
         const vdStatusColor = vdPrimaryStatus === "EN TRÁNSITO" ? T.blue
           : vdPrimaryStatus === "EN PRODUCCIÓN" ? T.warning
           : vdPrimaryStatus === "ENTREGADO AL CLIENTE" ? T.success
@@ -3453,7 +3469,7 @@ export default function ShipmentsPage() {
                         Cancelar
                       </button>
                       <button
-                        onClick={() => saveVesselDates(vd.name)}
+                        onClick={() => saveVesselDates(vd.name, vdContracts)}
                         disabled={vesselDateSaving}
                         style={{
                           padding: "5px 14px", fontSize: 11, fontWeight: 600, borderRadius: 6,
@@ -3471,43 +3487,57 @@ export default function ShipmentsPage() {
                 )}
               </div>
 
-              {/* Contracts scrollable area */}
+              {/* Contracts scrollable area — cuadritos compactos; primero lo
+                  que aún NO está entregado al cliente */}
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                <div style={{ padding: "16px 28px", display: "flex", flexDirection: "column", gap: 12 }}>
-                  {vdContracts.map((c) => (
-                    <div key={c.id} style={{ borderRadius: T.radiusMd, border: `1px solid ${T.borderLight}`, background: T.surfaceAlt, overflow: "hidden", transition: "background 0.2s ease" }}>
-                      {/* Contract header */}
-                      <div style={{ padding: "12px 16px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
+                <div style={{ padding: "14px 20px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(265px, 1fr))", gap: 10 }}>
+                  {[...vdContracts]
+                    .sort((a, b) => {
+                      const prio: Record<string, number> = { "EN TRÁNSITO": 0, "EN PRODUCCIÓN": 1, "PENDIENTE ANTICIPO": 2, "ENTREGADO AL CLIENTE": 9 };
+                      return (prio[a.status || ""] ?? 5) - (prio[b.status || ""] ?? 5)
+                        || (a.eta_final || "9999").localeCompare(b.eta_final || "9999");
+                    })
+                    .map((c) => {
+                    const entregado = c.status === "ENTREGADO AL CLIENTE";
+                    const phys = (c.physical_docs_sent || "").trim();
+                    const physOk = phys && !/^(no|pendiente|n\/?a|-)$/i.test(phys);
+                    return (
+                    <div key={c.id} style={{
+                      borderRadius: T.radiusMd, background: T.surfaceAlt,
+                      border: `1px solid ${T.borderLight}`,
+                      borderLeft: entregado ? `1px solid ${T.borderLight}` : `3px solid ${T.beacon}`,
+                      padding: "10px 12px", opacity: entregado ? 0.72 : 1,
+                      display: "flex", flexDirection: "column", gap: 7, minWidth: 0,
+                    }}>
+                      {/* contrato + copiar + estado */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSplitContract(c); }}
+                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace", background: "none", border: "none", padding: 0, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            title={`Ver contrato al lado${c.china_contract ? ` · China: ${c.china_contract}` : ""}`}
+                          >
+                            {displayContract(c, "S/C")}
+                            <ExternalLink style={{ width: 10, height: 10, flexShrink: 0 }} />
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSplitContract(c);
+                              navigator.clipboard.writeText(displayContract(c, ""));
+                              toast.success(`Copiado: ${displayContract(c, "")}`);
                             }}
-                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace", background: "none", border: "none", padding: 0, cursor: "pointer", transition: "opacity 0.15s" }}
-                            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.7"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-                            title="Ver contrato al lado (panel dividido)"
+                            title="Copiar número de contrato"
+                            style={{ display: "flex", alignItems: "center", background: "none", border: `1px solid ${T.borderLight}`, borderRadius: 5, padding: 3, cursor: "pointer", color: T.inkLight, flexShrink: 0, transition: "color 0.15s, border-color 0.15s" }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = T.accent; e.currentTarget.style.borderColor = T.accent; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = T.inkLight; e.currentTarget.style.borderColor = T.borderLight; }}
                           >
-                            {c.client_contract || "S/C"}
-                            <ExternalLink style={{ width: 11, height: 11, flexShrink: 0 }} />
+                            <Copy style={{ width: 10, height: 10 }} />
                           </button>
-                          {c.china_contract && (
-                            <>
-                              <span style={{ color: T.inkGhost }}>|</span>
-                              <span style={{ fontSize: 12, color: T.inkMuted, fontWeight: 500 }}>{c.china_contract}</span>
-                            </>
-                          )}
-                          <span style={{ color: T.inkGhost }}>—</span>
-                          <span style={{ fontSize: 12, color: T.inkMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.client_name}</span>
-                          {c.country && COUNTRY_FLAGS[c.country.toUpperCase()] && (
-                            <span style={{ fontSize: 13 }}>{COUNTRY_FLAGS[c.country.toUpperCase()]}</span>
-                          )}
-                        </div>
+                        </span>
                         <Badge
                           variant="outline"
                           className={cn(
-                            "text-[10px] font-semibold gap-1.5 rounded-lg px-2.5 py-1 shrink-0",
+                            "text-[9px] font-semibold gap-1 rounded-md px-1.5 py-0.5 shrink-0",
                             CONTRACT_STATUS_COLORS[c.status || ""] || "bg-gray-100 text-gray-800 border-gray-200"
                           )}
                         >
@@ -3515,207 +3545,93 @@ export default function ShipmentsPage() {
                           {CONTRACT_STATUS_LABELS[c.status || ""] || c.status || "—"}
                         </Badge>
                       </div>
-
-                      {/* Contract details grid — auto-fit para que las columnas
-                          se apilen en vez de desbordarse cuando el panel es angosto */}
-                      <div style={{ padding: "4px 16px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "14px 24px" }}>
-                        {/* Col 1: General */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-                          <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>General</p>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Comercial</span>
-                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.commercial_name || "—"}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Incoterm</span>
-                              <span className="font-medium text-slate-700">{c.incoterm || "—"}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Producto</span>
-                              <span className="font-medium text-slate-700 text-right max-w-[60%] truncate" title={c.detail || ""}>{c.detail || "—"}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Tipo Embarque</span>
-                              <span className="font-medium text-slate-700">{c.shipment_type || "—"}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Puerto Arribo</span>
-                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.arrival_port || "—"}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Col 2: Tons & Dates */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-                          <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>Toneladas & Fechas</p>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Tons. Acordadas</span>
-                              <span className="font-medium text-slate-700 tabular-nums">{formatNumber(c.tons_agreed ?? 0)} t</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Tons. Embarcadas</span>
-                              <span className="font-medium text-slate-700 tabular-nums">{formatNumber(c.tons_shipped ?? 0)} t</span>
-                            </div>
-                            {c.tons_difference != null && (
-                              <div className="flex justify-between">
-                                <span className="text-slate-400">Diferencia</span>
-                                <span className={cn("font-medium tabular-nums", (c.tons_difference ?? 0) < 0 ? "text-rose-600" : "text-emerald-600")}>{formatNumber(c.tons_difference)} t</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">ETD</span>
-                              {editingDateContractId === c.id && editingDateField === "etd" ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                  <input
-                                    type="date"
-                                    value={editingDateValue}
-                                    onChange={(e) => setEditingDateValue(e.target.value)}
-                                    style={{
-                                      fontSize: 11, padding: "2px 6px", borderRadius: T.radiusXs,
-                                      border: `1px solid ${T.accent}`, outline: "none",
-                                      fontFamily: "var(--font-jetbrains-mono), monospace",
-                                      width: 120,
-                                    }}
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={saveDateEdit}
-                                    disabled={savingDate}
-                                    style={{ color: T.success, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
-                                  >
-                                    <CheckCircle2 style={{ width: 14, height: 14 }} />
-                                  </button>
-                                  <button
-                                    onClick={cancelDateEdit}
-                                    style={{ color: T.danger, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
-                                  >
-                                    <X style={{ width: 14, height: 14 }} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span
-                                  className="font-medium text-slate-700 group/etd"
-                                  style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
-                                  onClick={() => startDateEdit(c.id!, "etd", c.etd)}
-                                >
-                                  {c.etd ? formatDate(c.etd) : "\u2014"}
-                                  <Pencil style={{ width: 10, height: 10, color: T.inkGhost, opacity: 0.5 }} />
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">ETA Inicial</span>
-                              <span className="font-medium text-slate-700">{c.eta_initial ? formatDate(c.eta_initial) : "\u2014"}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">ETA Final</span>
-                              {editingDateContractId === c.id && editingDateField === "eta_final" ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                  <input
-                                    type="date"
-                                    value={editingDateValue}
-                                    onChange={(e) => setEditingDateValue(e.target.value)}
-                                    style={{
-                                      fontSize: 11, padding: "2px 6px", borderRadius: T.radiusXs,
-                                      border: `1px solid ${T.accent}`, outline: "none",
-                                      fontFamily: "var(--font-jetbrains-mono), monospace",
-                                      width: 120,
-                                    }}
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={saveDateEdit}
-                                    disabled={savingDate}
-                                    style={{ color: T.success, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
-                                  >
-                                    <CheckCircle2 style={{ width: 14, height: 14 }} />
-                                  </button>
-                                  <button
-                                    onClick={cancelDateEdit}
-                                    style={{ color: T.danger, border: "none", background: "none", cursor: "pointer", padding: 2, display: "flex" }}
-                                  >
-                                    <X style={{ width: 14, height: 14 }} />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span
-                                  className="font-bold text-[#1E3A5F]"
-                                  style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}
-                                  onClick={() => startDateEdit(c.id!, "eta_final", c.eta_final)}
-                                >
-                                  {c.eta_final ? formatDate(c.eta_final) : "\u2014"}
-                                  <Pencil style={{ width: 10, height: 10, color: T.inkGhost, opacity: 0.5 }} />
-                                </span>
-                              )}
-                            </div>
-                            {c.days_difference != null && (
-                              <div className="flex justify-between">
-                                <span className="text-slate-400">Dif. Días</span>
-                                <span className={cn("font-medium tabular-nums", (c.days_difference ?? 0) > 0 ? "text-rose-600" : "text-emerald-600")}>{c.days_difference} días</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Col 3: Payments & Docs */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-                          <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: T.inkLight, borderBottom: `1px solid ${T.borderLight}`, paddingBottom: 4 }}>Pagos & Documentos</p>
-                          <div className="space-y-1.5 text-xs">
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">Anticipo</span>
-                              {c.advance_paid === "SI" ? (
-                                <span className="flex items-center gap-1 text-emerald-600 font-medium"><CheckCircle2 className="h-3 w-3" />Pagado</span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-amber-600 font-medium"><Clock className="h-3 w-3" />Pendiente</span>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">Saldo</span>
-                              {c.balance_paid === "SI" ? (
-                                <span className="flex items-center gap-1 text-emerald-600 font-medium"><CheckCircle2 className="h-3 w-3" />Pagado</span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-amber-600 font-medium"><Clock className="h-3 w-3" />Pendiente</span>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">Monto Pendiente</span>
-                              <span className={cn("font-bold tabular-nums", (c.pending_client_amount ?? 0) > 0 ? "text-rose-600" : "text-emerald-600")}>
-                                {formatCurrency(c.pending_client_amount ?? 0)}
+                      {/* cliente + puerto */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 11, color: T.inkMuted, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.client_name}{c.country && COUNTRY_FLAGS[c.country.toUpperCase()] ? ` ${COUNTRY_FLAGS[c.country.toUpperCase()]}` : ""}
+                        </span>
+                        <span style={{ fontSize: 10.5, color: T.inkLight, fontWeight: 600, whiteSpace: "nowrap" }}>{c.arrival_port || "—"}</span>
+                      </div>
+                      {/* ETD / ETA editables */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, borderTop: `1px solid ${T.borderLight}`, paddingTop: 7, flexWrap: "wrap" }}>
+                        {(["etd", "eta_final"] as const).map((field) => (
+                          <div key={field} style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+                            <span style={{ fontSize: 9.5, fontWeight: 700, color: T.inkLight, letterSpacing: "0.04em" }}>{field === "etd" ? "ETD" : "ETA"}</span>
+                            {editingDateContractId === c.id && editingDateField === field ? (
+                              <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                                <input
+                                  type="date"
+                                  value={editingDateValue}
+                                  onChange={(e) => setEditingDateValue(e.target.value)}
+                                  style={{ fontSize: 10.5, padding: "1px 4px", borderRadius: T.radiusXs, border: `1px solid ${T.accent}`, outline: "none", fontFamily: "var(--font-jetbrains-mono), monospace", width: 112 }}
+                                  autoFocus
+                                />
+                                <button onClick={saveDateEdit} disabled={savingDate} style={{ color: T.success, border: "none", background: "none", cursor: "pointer", padding: 1, display: "flex" }}>
+                                  <CheckCircle2 style={{ width: 13, height: 13 }} />
+                                </button>
+                                <button onClick={cancelDateEdit} style={{ color: T.danger, border: "none", background: "none", cursor: "pointer", padding: 1, display: "flex" }}>
+                                  <X style={{ width: 13, height: 13 }} />
+                                </button>
                               </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">BL Liberado</span>
-                              {c.bl_released === "SI" ? (
-                                <span className="flex items-center gap-1 text-emerald-600 font-medium"><CheckCircle2 className="h-3 w-3" />Liberado</span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-red-500 font-medium"><XCircle className="h-3 w-3" />Pendiente</span>
-                              )}
-                            </div>
-                            {c.bl_number && (
-                              <div className="flex justify-between">
-                                <span className="text-slate-400">N° BL</span>
-                                <span className="font-medium text-slate-700">{c.bl_number}</span>
-                              </div>
+                            ) : (
+                              <span
+                                onClick={() => startDateEdit(c.id!, field, c[field])}
+                                style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 11.5, fontWeight: field === "eta_final" ? 800 : 600, color: field === "eta_final" ? "#1E3A5F" : T.inkSoft, fontFamily: "var(--font-jetbrains-mono), monospace", whiteSpace: "nowrap" }}
+                              >
+                                {c[field] ? formatDate(c[field]) : "—"}
+                                <Pencil style={{ width: 9, height: 9, color: T.inkGhost, opacity: 0.5 }} />
+                              </span>
                             )}
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-400 shrink-0">Docs. Enviados</span>
-                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.documents_sent || "—"}</span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-400 shrink-0">Docs. Pendientes</span>
-                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.documents_pending || "—"}</span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-400 shrink-0">Docs. Físicos</span>
-                              <span className="font-medium text-slate-700 text-right break-words min-w-0">{c.physical_docs_sent || "—"}</span>
-                            </div>
                           </div>
+                        ))}
+                      </div>
+                      {/* saldo + docs */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, borderTop: `1px solid ${T.borderLight}`, paddingTop: 7, fontSize: 11 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ color: T.inkLight }}>Saldo a pagar</span>
+                          {(c.pending_client_amount ?? 0) > 0 ? (
+                            <span className="font-bold tabular-nums text-rose-600">{formatCurrency(c.pending_client_amount ?? 0)}</span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-emerald-600 font-medium"><CheckCircle2 className="h-3 w-3" />Pagado</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ color: T.inkLight }}>BL liberado</span>
+                          {isBlReleased(c.bl_released) ? (
+                            <span className="flex items-center gap-1 text-emerald-600 font-medium"><CheckCircle2 className="h-3 w-3" />Liberado</span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-red-500 font-medium"><XCircle className="h-3 w-3" />Pendiente</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+                          <span style={{ color: T.inkLight, flexShrink: 0 }}>Docs</span>
+                          <span title={`Enviados: ${c.documents_sent || "—"} · Pendientes: ${c.documents_pending || "—"}`}
+                            style={{ fontWeight: 600, color: T.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "right" }}>
+                            {c.documents_sent || "—"}
+                          </span>
+                        </div>
+                        {c.documents_pending && !/^(ok|n\/?a|-)$/i.test(c.documents_pending.trim()) && (
+                          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+                            <span style={{ color: T.warning, flexShrink: 0, fontWeight: 600 }}>Pdtes</span>
+                            <span title={c.documents_pending} style={{ fontWeight: 600, color: T.warning, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "right" }}>
+                              {c.documents_pending}
+                            </span>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ color: T.inkLight }}>Físico</span>
+                          {physOk ? (
+                            <span title={phys} className="flex items-center gap-1 text-emerald-600 font-medium" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <CheckCircle2 className="h-3 w-3 shrink-0" />{/^(si|ok)$/i.test(phys) ? "Enviado" : phys}
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-amber-600 font-medium"><Clock className="h-3 w-3" />Pendiente</span>
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { Download, Loader2, ClipboardList, RefreshCw, FileDown } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { displayContract } from "@/lib/utils";
 import { generatePDFReport } from "@/lib/pdf-report";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
@@ -156,7 +157,7 @@ export default function ContractsReportPage() {
       // DATA ROWS
       contracts.forEach((c, idx) => {
         const row = ws.addRow([
-          fmtDate(c.contract_date), c.china_contract || "", c.client_contract || "",
+          fmtDate(c.contract_date), c.china_contract || "", displayContract(c, ""),
           c.commercial_name || "", c.client_name || "", c.country || "",
           c.detail || "", c.tons_agreed ?? "", c.tons_shipped ?? "",
           c.incoterm || "", fmtDate(c.exw_date), c.status || "",
@@ -253,7 +254,7 @@ export default function ContractsReportPage() {
         data: contracts.map((c) => ({
           fecha: fmtDate(c.contract_date),
           china: c.china_contract || "",
-          cliente_c: c.client_contract || "",
+          cliente_c: displayContract(c, ""),
           comercial: c.commercial_name || "",
           cliente: c.client_name || "",
           pais: c.country || "",

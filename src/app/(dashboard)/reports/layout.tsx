@@ -21,6 +21,7 @@ const TABS = [
   { key: "contracts", label: "Contratos", href: "/reports/contracts", icon: TabIcons.contracts },
   { key: "clients", label: "Clientes", href: "/reports/clients", icon: TabIcons.contracts },
   { key: "cartera", label: "Cartera", href: "/reports/cartera", icon: TabIcons.cartera },
+  { key: "pagos-comerciales", label: "Pagos × Comercial", href: "/reports/pagos-comerciales", icon: TabIcons.payments },
   { key: "payments", label: "Pagos", href: "/reports/payments", icon: TabIcons.payments },
   { key: "invoices", label: "Facturas", href: "/reports/invoices", icon: TabIcons.invoices },
   { key: "quotations", label: "Cotizaciones", href: "/reports/quotations", icon: TabIcons.quotations },

@@ -3,7 +3,7 @@
 import { Download, RefreshCw, FileDown, Search, X, FolderDown } from "lucide-react";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
-import { useCarteraData, FilterPopover, STATUS_OPTIONS, labelFor } from "./_core";
+import { useCarteraData, FilterPopover, DateRangePopover, STATUS_OPTIONS, labelFor } from "./_core";
 import VariantAurora from "./_variant-aurora";
 
 export default function CarteraReportPage() {
@@ -21,6 +21,8 @@ export default function CarteraReportPage() {
         </div>
         <FilterPopover label="Cliente" options={d.filterOptions.client_names} selected={d.filterClient} onChange={d.setFilterClient} />
         <FilterPopover label="Embarque" options={STATUS_OPTIONS} selected={d.filterStatus} onChange={d.setFilterStatus} />
+        <FilterPopover label="Motonave" options={d.vesselOptions} selected={d.filterVessel} onChange={d.setFilterVessel} />
+        <DateRangePopover from={d.filterDateFrom} to={d.filterDateTo} onChange={d.setFilterDateRange} options={d.etaOptions} />
         <FilterPopover label="Estado cartera" options={["ATRASADO", "A_TIEMPO", "ADELANTADO", "SIN_FECHA"]} selected={d.filterEstado} onChange={d.setFilterEstado} accentColor={T.danger} />
         {d.activeFilterCount > 0 && (
           <button onClick={d.clearAllFilters} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, border: `1px solid ${T.dangerSoft}`, background: T.dangerBg + "40", color: T.danger, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>

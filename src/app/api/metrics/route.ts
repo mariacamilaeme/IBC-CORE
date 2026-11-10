@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     let etasQ = supabase
       .from("contracts")
-      .select("id, client_name, client_contract, commercial_name, vessel_name, eta_final, bl_number, country, status")
+      .select("id, client_name, client_contract, china_contract, commercial_name, vessel_name, eta_final, bl_number, country, status")
       .eq("is_active", true)
       .eq("status", "EN TRÁNSITO");
     if (!isAllYears) {

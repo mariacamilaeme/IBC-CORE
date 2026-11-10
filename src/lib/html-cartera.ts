@@ -12,7 +12,9 @@ export interface CarteraHTMLItem {
   material: string;
   saldo: number;
   eta: string;       // dd/mm/yyyy o "—"
-  deadline: string;  // dd/mm/yyyy o "—"
+  deadline: string;  // deadline motonave dd/mm/yyyy o "—"
+  dueDate?: string;  // vencimiento del pago (JPB) dd/mm/yyyy, "60 días BL · falta fecha BL" o "—"
+  dueSpecial?: boolean; // true si el vencimiento viene de un término especial (JPB)
   estadoLabel: string;
   estadoKey: EstadoKey;
   days: number | null;
@@ -121,7 +123,7 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
   for (const g of o.groups) {
     if (!o.clientName) {
       const pctAtr = g.total > 0 ? Math.round((g.atrasado / g.total) * 100) : 0;
-      rows.push(`<tr class="grp"><td colspan="5">
+      rows.push(`<tr class="grp"><td colspan="6">
         <span class="grp-name">${esc(g.client)}</span>${pctAtr > 0 ? `<span class="grp-risk">${pctAtr}% vencido</span>` : ""}
       </td><td class="num grp-total">${money(g.total)}</td></tr>`);
     }
@@ -131,7 +133,8 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
         <td class="c-material">${esc(it.material)}</td>
         <td class="num c-saldo ${it.overdue ? "od" : ""}">${money(it.saldo)}</td>
         <td class="ctr c-date">${esc(it.eta)}</td>
-        <td class="ctr c-date ${it.overdue ? "od" : ""}">${esc(it.deadline)}</td>
+        <td class="ctr c-date">${esc(it.deadline)}</td>
+        <td class="ctr c-date ${it.overdue ? "od" : ""}${it.dueSpecial ? " due-sp" : ""}">${esc(it.dueDate ?? it.deadline)}</td>
         <td class="ctr"><span class="pill ${estadoClass[it.estadoKey]}"><i></i>${esc(it.estadoLabel)}</span></td>
       </tr>`);
     }
@@ -139,7 +142,7 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
   rows.push(`<tr class="total-row">
     <td colspan="2">Cartera total por cobrar</td>
     <td class="num">${money(o.total)}</td>
-    <td colspan="3"></td>
+    <td colspan="4"></td>
   </tr>`);
 
   const sub = o.clientName ? `${o.ops} operaciones` : `${o.ops} operaciones · ${o.clientes} clientes`;
@@ -254,6 +257,7 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
   td.c-material{color:var(--ink-soft);font-weight:500}
   td.c-saldo{font-weight:700;color:var(--ink);font-size:10.5px}
   td.c-date{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--ink-soft)}
+  td.c-date.due-sp{color:var(--blue);font-weight:700}
   td.od{color:var(--red)!important;font-weight:700}
   tr.grp td{padding:11px 8px 6px;border-bottom:1px solid var(--line)}
   .grp-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:11.5px;color:var(--ink)}
@@ -361,7 +365,7 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
       <table>
         <thead><tr>
           <th>Contrato</th><th>Material</th><th class="num">Saldo (USD)</th>
-          <th class="ctr">ETA</th><th class="ctr">Deadline</th><th class="ctr">Estado</th>
+          <th class="ctr">ETA</th><th class="ctr">Deadline motonave</th><th class="ctr">Vencimiento pago</th><th class="ctr">Estado</th>
         </tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table>
@@ -369,7 +373,7 @@ function buildHTML(o: CarteraHTMLOptions, logo: string | null): string {
 
     <div class="foot">
       <span><b>IBC STEEL GROUP S.A.S.</b> · Documento interno · Confidencial</span>
-      <span class="mono">Deadline = ETA − ${o.deadlineDays} días · ${esc(o.generatedDateTime)}</span>
+      <span class="mono">Deadline motonave = ETA − ${o.deadlineDays} días · Vencimiento pago = término JPB (p. ej. 60 días BL) o deadline motonave · ${esc(o.generatedDateTime)}</span>
     </div>
   </div>
 

@@ -352,6 +352,7 @@ export async function POST(request: NextRequest) {
       production_time_days: body.production_time_days != null ? Number(body.production_time_days) : null,
       advance_payment_date: body.advance_payment_date || null,
       delivery_date_pcc: body.delivery_date_pcc || null,
+      safety_incident: body.safety_incident?.trim() || null,
       exw_date: body.exw_date || null,
       etd: body.etd || null,
       eta_initial: body.eta_initial || null,
@@ -546,6 +547,7 @@ export async function PATCH(request: NextRequest) {
       "production_time_days",
       "advance_payment_date",
       "delivery_date_pcc",
+      "safety_incident",
       "exw_date",
       "etd",
       "eta_initial",
@@ -589,12 +591,24 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Update contract
-    const { data: updatedContract, error: updateError } = await supabase
+    let { data: updatedContract, error: updateError } = await supabase
       .from("contracts")
       .update(updateData)
       .eq("id", body.id)
       .select()
       .single();
+
+    // Tolerancia: si la migración 004 (safety_incident) aún no corre en la BD,
+    // se reintenta sin ese campo para no bloquear la edición de contratos.
+    if (updateError?.code === "42703" && "safety_incident" in updateData) {
+      delete (updateData as Record<string, unknown>).safety_incident;
+      ({ data: updatedContract, error: updateError } = await supabase
+        .from("contracts")
+        .update(updateData)
+        .eq("id", body.id)
+        .select()
+        .single());
+    }
 
     if (updateError) {
       console.error("Error updating contract:", updateError);

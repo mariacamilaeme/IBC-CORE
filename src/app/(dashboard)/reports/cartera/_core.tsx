@@ -5,7 +5,12 @@ import { toast } from "sonner";
 import { Search, X, ChevronDown, Check } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
 import { T } from "@/lib/design-tokens";
+import { buildVesselLabels } from "@/lib/vessel-voyages";
+import { displayContract } from "@/lib/utils";
+import { paymentDueDate, isBLCredit, pendingTermsLabel } from "@/lib/payment-terms";
 import type { Contract } from "@/types";
+
+export { buildVesselLabels };
 
 // ===========================================================================
 // Business rules & types
@@ -26,7 +31,15 @@ export const AG = { porVencer: "#16A34A", d0_30: "#CA8A04", d31_60: "#F97316", d
 
 export const STATUS_OPTIONS = ["EN TRÁNSITO", "EN PRODUCCIÓN", "ENTREGADO AL CLIENTE", "PENDIENTE ANTICIPO"];
 
-export type Row = { c: Contract; estado: EstadoCartera; days: number | null };
+/** Fechas de pago de un contrato: deadline de la motonave y vencimiento real del pago (columna JPB). */
+export type PayInfo = {
+  mvDeadline: string | null;   // ETA − DEADLINE_DAYS
+  dueDate: string | null;      // fecha con la que se cobra: la anotada en JPB o, si no hay, el deadline MV
+  special: boolean;            // true cuando dueDate viene de la anotación JPB
+  pendingLabel: string | null; // p. ej. "60 días BL · falta fecha BL" (crédito sin fecha todavía)
+  terms: string | null;        // texto original de JPB
+};
+export type Row = { c: Contract; estado: EstadoCartera; days: number | null; vesselLabel: string | null; pay: PayInfo };
 export type Group = { client: string; items: Row[]; total: number; atrasado: number };
 export type Bucket = { amt: number; n: number };
 export type Aging = { porVencer: Bucket; d0_30: Bucket; d31_60: Bucket; d60: Bucket; sinFecha: Bucket };
@@ -51,6 +64,31 @@ const addDaysUTC = (date: Date, days: number) => { const dt = new Date(date.getT
 export const todayUTC = () => { const n = new Date(); return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate())); };
 export const isoFromDate = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 export const deadlineISO = (eta: string | null | undefined) => { const e = parseUTC(eta); return e ? isoFromDate(addDaysUTC(e, -DEADLINE_DAYS)) : null; };
+
+export const payInfoOf = (c: Contract): PayInfo => {
+  const mvDeadline = deadlineISO(c.eta_final);
+  const terms = c.payment_terms?.trim() || null;
+  const due = paymentDueDate(terms, c.eta_final);
+  const pendingCredit = !due && isBLCredit(terms);
+  return {
+    mvDeadline,
+    dueDate: due ?? (pendingCredit ? null : mvDeadline),
+    special: !!due,
+    pendingLabel: pendingCredit ? pendingTermsLabel(terms) : null,
+    terms,
+  };
+};
+
+/** Estado según la fecha de vencimiento del pago (ISO). */
+export const estadoFromDue = (dl: string | null | undefined, today: Date): EstadoCartera => {
+  if (!dl) return "SIN_FECHA";
+  const diff = Math.round((parseUTC(dl)!.getTime() - today.getTime()) / 86400000);
+  if (diff < 0) return "ATRASADO";
+  if (diff === 0) return "A_TIEMPO";
+  return "ADELANTADO";
+};
+export const daysToDue = (dl: string | null | undefined, today: Date): number | null =>
+  dl ? Math.round((parseUTC(dl)!.getTime() - today.getTime()) / 86400000) : null;
 
 export const computeEstado = (eta: string | null | undefined, today: Date): EstadoCartera => {
   const dl = deadlineISO(eta);
@@ -85,11 +123,16 @@ export interface CarteraData {
   filterClient: string[]; setFilterClient: (v: string[]) => void;
   filterStatus: string[]; setFilterStatus: (v: string[]) => void;
   filterEstado: string[]; setFilterEstado: (v: string[]) => void;
+  filterVessel: string[]; setFilterVessel: (v: string[]) => void;
+  vesselOptions: string[];
+  filterDateFrom: string; filterDateTo: string; setFilterDateRange: (from: string, to: string) => void;
+  etaOptions: { date: string; n: number }[];
   filterOptions: { client_names: string[] };
   activeFilterCount: number; clearAllFilters: () => void;
   rows: Row[]; kpis: Kpis; aging: Aging; groups: Group[];
   fetchData: () => void; handleDownloadPDF: () => void; handleDownloadExcel: () => void;
   handleDownloadExcelPorCliente: () => void;
+  handleDownloadExcelCliente: (g: Group) => Promise<void>;
 }
 
 export function useCarteraData(): CarteraData {
@@ -100,6 +143,9 @@ export function useCarteraData(): CarteraData {
   const [filterClient, setFilterClient] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string[]>(["EN TRÁNSITO"]);
   const [filterEstado, setFilterEstado] = useState<string[]>([]);
+  const [filterVessel, setFilterVessel] = useState<string[]>([]);
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
   const [filterOptions, setFilterOptions] = useState<{ client_names: string[] }>({ client_names: [] });
 
   const today = useMemo(() => todayUTC(), []);
@@ -136,10 +182,42 @@ export function useCarteraData(): CarteraData {
     })();
   }, []);
 
+  const vesselLabels = useMemo(() => buildVesselLabels(contracts), [contracts]);
+  const vesselOptions = useMemo(
+    () => Array.from(new Set(vesselLabels.values())).sort((a, b) => a.localeCompare(b)),
+    [vesselLabels]);
+
+  // Filas con todos los filtros EXCEPTO el de fecha — de aquí salen también
+  // las "fechas disponibles" que muestra el popover del filtro de fecha.
+  const baseRows: Row[] = useMemo(() =>
+    contracts.map((c) => {
+      const pay = payInfoOf(c);
+      return {
+      c, pay,
+      estado: estadoFromDue(pay.dueDate, today),
+      days: daysToDue(pay.dueDate, today),
+      vesselLabel: (c.id && vesselLabels.get(c.id)) || (c.vessel_name ? c.vessel_name.trim().toUpperCase() : null),
+    }; })
+      .filter((r) => (filterEstado.length ? filterEstado.includes(r.estado) : true))
+      .filter((r) => (filterVessel.length ? (r.vesselLabel != null && filterVessel.includes(r.vesselLabel)) : true)),
+    [contracts, today, filterEstado, filterVessel, vesselLabels]);
+
+  const etaOptions = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of baseRows) { if (r.c.eta_final) { const d = onlyDate(r.c.eta_final); m.set(d, (m.get(d) ?? 0) + 1); } }
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, n]) => ({ date, n }));
+  }, [baseRows]);
+
   const rows: Row[] = useMemo(() =>
-    contracts.map((c) => ({ c, estado: computeEstado(c.eta_final, today), days: daysToDeadline(c.eta_final, today) }))
-      .filter((r) => (filterEstado.length ? filterEstado.includes(r.estado) : true)),
-    [contracts, today, filterEstado]);
+    baseRows.filter((r) => {
+      if (!filterDateFrom && !filterDateTo) return true;
+      const eta = r.c.eta_final ? onlyDate(r.c.eta_final) : null;
+      if (!eta) return false;
+      if (filterDateFrom && eta < filterDateFrom) return false;
+      if (filterDateTo && eta > filterDateTo) return false;
+      return true;
+    }),
+    [baseRows, filterDateFrom, filterDateTo]);
 
   const kpis: Kpis = useMemo(() => {
     let total = 0, montoAtrasado = 0, montoATiempo = 0, montoAdelantado = 0, montoSinFecha = 0;
@@ -178,10 +256,13 @@ export function useCarteraData(): CarteraData {
     }).sort((a, b) => b.total - a.total);
   }, [rows]);
 
-  const activeFilterCount = [filterClient, filterStatus, filterEstado].filter((f) => f.length > 0).length
-    - (filterStatus.length === 1 && filterStatus[0] === "EN TRÁNSITO" ? 1 : 0);
+  const activeFilterCount = [filterClient, filterStatus, filterEstado, filterVessel].filter((f) => f.length > 0).length
+    - (filterStatus.length === 1 && filterStatus[0] === "EN TRÁNSITO" ? 1 : 0)
+    + (filterDateFrom || filterDateTo ? 1 : 0);
 
-  const clearAllFilters = () => { setSearchQuery(""); setFilterClient([]); setFilterStatus(["EN TRÁNSITO"]); setFilterEstado([]); };
+  const setFilterDateRange = (from: string, to: string) => { setFilterDateFrom(from); setFilterDateTo(to); };
+
+  const clearAllFilters = () => { setSearchQuery(""); setFilterClient([]); setFilterStatus(["EN TRÁNSITO"]); setFilterEstado([]); setFilterVessel([]); setFilterDateFrom(""); setFilterDateTo(""); };
 
   // -------- PDF premium (HTML → imprimir / Guardar como PDF) --------
   const handleDownloadPDF = async () => {
@@ -212,9 +293,10 @@ export function useCarteraData(): CarteraData {
         groups: groups.map((g) => ({
           client: g.client, total: g.total, atrasado: g.atrasado,
           items: g.items.map((r) => ({
-            contract: r.c.client_contract || "—", material: r.c.detail || "—",
+            contract: displayContract(r.c), material: r.c.detail || "—",
             saldo: r.c.pending_client_amount ?? 0,
-            eta: fmtDate(r.c.eta_final), deadline: fmtDate(deadlineISO(r.c.eta_final)),
+            eta: fmtDate(r.c.eta_final), deadline: fmtDate(r.pay.mvDeadline),
+            dueDate: r.pay.dueDate ? fmtDate(r.pay.dueDate) : (r.pay.pendingLabel || "—"), dueSpecial: r.pay.special || !!r.pay.pendingLabel,
             estadoLabel: ESTADO_META[r.estado].label, estadoKey: r.estado,
             days: r.days, overdue: r.estado === "ATRASADO",
           })),
@@ -241,8 +323,8 @@ export function useCarteraData(): CarteraData {
         RED = "C0392B", GREEN = "1E874B", AMBER = "B7791F", GREY = "8B95A5", FONT = "Aptos";
       const estadoText: Record<EstadoCartera, string> = { ATRASADO: RED, A_TIEMPO: AMBER, ADELANTADO: GREEN, SIN_FECHA: GREY };
       const logoId = await addLogoToWorkbook(wb);
-      ws.columns = [{ key: "contract", width: 24 }, { key: "material", width: 56 }, { key: "saldo", width: 20 }, { key: "eta", width: 15 }, { key: "deadline", width: 15 }, { key: "estado", width: 17 }];
-      const totalCols = 6;
+      ws.columns = [{ key: "contract", width: 24 }, { key: "material", width: 52 }, { key: "saldo", width: 20 }, { key: "eta", width: 14 }, { key: "deadline", width: 17 }, { key: "due", width: 24 }, { key: "estado", width: 16 }];
+      const totalCols = 7;
       const now = new Date();
       const dateStr = now.toLocaleDateString("es-CO", { year: "numeric", month: "long", day: "numeric" });
       const singleClient = gs.length === 1 ? gs[0].client : null;
@@ -297,7 +379,7 @@ export function useCarteraData(): CarteraData {
       for (let col = 1; col <= totalCols; col++) r5.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: WHITE } };
 
       // ROW 6 — column headers
-      const hr = ws.addRow(["CONTRATO", "MATERIAL", "SALDO (USD)", "ETA", "DEADLINE", "ESTADO"]); hr.height = 26;
+      const hr = ws.addRow(["CONTRATO", "MATERIAL", "SALDO (USD)", "ETA", "DEADLINE MOTONAVE", "VENCIMIENTO PAGO", "ESTADO"]); hr.height = 30;
       hr.eachCell((cell, colNumber) => {
         cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: WHITE } };
         cell.alignment = { horizontal: colNumber === 3 ? "right" : colNumber >= 4 ? "center" : "left", vertical: "middle", indent: colNumber <= 2 ? 1 : 0 };
@@ -310,7 +392,7 @@ export function useCarteraData(): CarteraData {
         // Group header row per cliente — se omite cuando el reporte es de un solo cliente
         // (ya aparece destacado en el encabezado superior).
         if (!singleClient) {
-          const gh = ws.addRow([g.client, "", "", "", "", ""]);
+          const gh = ws.addRow([g.client, "", "", "", "", "", ""]);
           ws.mergeCells(gh.number, 1, gh.number, 2);
           gh.getCell(3).value = g.total; gh.getCell(3).numFmt = '"$"#,##0.00';
           for (let col = 1; col <= totalCols; col++) {
@@ -324,10 +406,12 @@ export function useCarteraData(): CarteraData {
         }
         for (const r of g.items) {
           const c = r.c;
-          const row = ws.addRow([c.client_contract || "", c.detail || "", c.pending_client_amount ?? "",
+          const row = ws.addRow([displayContract(c, ""), c.detail || "", c.pending_client_amount ?? "",
             parseUTC(c.eta_final) ? new Date(onlyDate(c.eta_final!) + "T00:00:00") : "",
-            deadlineISO(c.eta_final) ? new Date(deadlineISO(c.eta_final)! + "T00:00:00") : "",
+            r.pay.mvDeadline ? new Date(r.pay.mvDeadline + "T00:00:00") : "",
+            r.pay.dueDate ? new Date(r.pay.dueDate + "T00:00:00") : (r.pay.pendingLabel || ""),
             ESTADO_META[r.estado].label]);
+          if (r.pay.terms) row.getCell(6).note = `Término de pago (JPB): ${r.pay.terms}`;
           const bg = stripe % 2 === 0 ? WHITE : "FBFAF7"; stripe++;
           row.eachCell((cell, colNumber) => {
             cell.font = { name: FONT, size: 10, color: { argb: INK_SOFT } };
@@ -337,14 +421,18 @@ export function useCarteraData(): CarteraData {
             if (colNumber === 1) cell.font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } };
             if (colNumber === 2) cell.alignment = { vertical: "middle", wrapText: true };
             if (colNumber === 3) { cell.numFmt = '"$"#,##0.00'; cell.alignment = { horizontal: "right", vertical: "middle" }; cell.font = { name: FONT, size: 10.5, bold: true, color: { argb: INK } }; }
-            if (colNumber === 4 || colNumber === 5) { cell.numFmt = "DD/MM/YYYY"; cell.alignment = { horizontal: "center", vertical: "middle" }; if (colNumber === 5 && r.estado === "ATRASADO") cell.font = { name: FONT, size: 10, bold: true, color: { argb: RED } }; }
-            if (colNumber === 6) { cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: estadoText[r.estado] } }; cell.alignment = { horizontal: "center", vertical: "middle" }; }
+            if (colNumber === 4 || colNumber === 5) { cell.numFmt = "DD/MM/YYYY"; cell.alignment = { horizontal: "center", vertical: "middle" }; }
+            if (colNumber === 6) {
+              cell.numFmt = "DD/MM/YYYY"; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+              cell.font = { name: FONT, size: 10, bold: true, italic: !r.pay.dueDate, color: { argb: r.estado === "ATRASADO" ? RED : (r.pay.special || r.pay.pendingLabel) ? NAVY : INK_SOFT } };
+            }
+            if (colNumber === 7) { cell.font = { name: FONT, size: 9.5, bold: true, color: { argb: estadoText[r.estado] } }; cell.alignment = { horizontal: "center", vertical: "middle" }; }
           });
           row.height = 22;
         }
       }
 
-      const tr = ws.addRow(["TOTAL CARTERA", "", k.total, "", "", ""]);
+      const tr = ws.addRow(["TOTAL CARTERA", "", k.total, "", "", "", ""]);
       ws.mergeCells(tr.number, 1, tr.number, 2);
       for (let col = 1; col <= totalCols; col++) {
         const cell = tr.getCell(col);
@@ -362,7 +450,7 @@ export function useCarteraData(): CarteraData {
       ws.mergeCells(fIdx, 1, fIdx, totalCols);
       ws.getCell(`A${fIdx}`).value = { richText: [
         { text: "IBC STEEL GROUP S.A.S.", font: { name: FONT, size: 8.5, bold: true, color: { argb: NAVY } } },
-        { text: `   ·   Deadline = ETA − ${DEADLINE_DAYS} días   ·   Documento interno de control de cartera · Confidencial   ·   ${now.toLocaleString("es-CO")}`, font: { name: FONT, size: 8, italic: true, color: { argb: INK_LIGHT } } },
+        { text: `   ·   Deadline motonave = ETA − ${DEADLINE_DAYS} días   ·   Vencimiento pago = fecha anotada en JPB (p. ej. 60 días BL) o, si no hay, el deadline motonave   ·   Documento interno de control de cartera · Confidencial   ·   ${now.toLocaleString("es-CO")}`, font: { name: FONT, size: 8, italic: true, color: { argb: INK_LIGHT } } },
       ] };
       ws.getCell(`A${fIdx}`).alignment = { horizontal: "center", vertical: "middle" };
       ws.getCell(`A${fIdx}`).border = { top: { style: "thin", color: { argb: LINE } } };
@@ -415,17 +503,32 @@ export function useCarteraData(): CarteraData {
     return b;
   };
 
+  const carteraFileName = (client: string) => {
+    const hoy = new Date();
+    const dateTag = `${String(hoy.getDate()).padStart(2, "0")}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
+    const safe = client.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 45);
+    return `REPORTE CARTERA ${safe} ${dateTag}.xlsx`;
+  };
+
+  const handleDownloadExcelCliente = async (g: Group) => {
+    try {
+      const blob = await buildCarteraExcelBlob([g], kpisOf(g.items), agingOf(g.items));
+      downloadBlob(blob, carteraFileName(g.client));
+      toast.success(`Reporte de cartera de ${g.client} descargado`);
+    } catch (e) {
+      console.error(e);
+      toast.error(`Error generando el reporte de ${g.client}`);
+    }
+  };
+
   const handleDownloadExcelPorCliente = async () => {
     if (groups.length === 0) { toast.info("No hay clientes en la vista actual"); return; }
     toast.info(`Generando ${groups.length} archivo${groups.length !== 1 ? "s" : ""} de Excel — uno por cliente...`);
-    const hoy = new Date();
-    const dateTag = `${String(hoy.getDate()).padStart(2, "0")}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
     let done = 0;
     try {
       for (const g of groups) {
         const blob = await buildCarteraExcelBlob([g], kpisOf(g.items), agingOf(g.items));
-        const safe = g.client.replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 45);
-        downloadBlob(blob, `REPORTE CARTERA ${safe} ${dateTag}.xlsx`);
+        downloadBlob(blob, carteraFileName(g.client));
         done++;
         // pausa breve entre descargas para que el navegador no las bloquee
         await new Promise((resolve) => setTimeout(resolve, 450));
@@ -441,8 +544,11 @@ export function useCarteraData(): CarteraData {
 
   return {
     loading, today, searchQuery, setSearchQuery, filterClient, setFilterClient, filterStatus, setFilterStatus,
-    filterEstado, setFilterEstado, filterOptions, activeFilterCount, clearAllFilters,
+    filterEstado, setFilterEstado, filterVessel, setFilterVessel, vesselOptions,
+    filterDateFrom, filterDateTo, setFilterDateRange, etaOptions,
+    filterOptions, activeFilterCount, clearAllFilters,
     rows, kpis, aging, groups, fetchData, handleDownloadPDF, handleDownloadExcel, handleDownloadExcelPorCliente,
+    handleDownloadExcelCliente,
   };
 }
 
@@ -533,3 +639,63 @@ export function FilterPopover({ label, options, selected, onChange, accentColor 
 }
 
 export const labelFor = (estado: string) => ({ ATRASADO: "Atrasado", A_TIEMPO: "A tiempo", ADELANTADO: "Adelantado", SIN_FECHA: "Sin fecha" }[estado] || estado);
+
+export function DateRangePopover({ from, to, onChange, options = [], accentColor = T.accent }: {
+  from: string; to: string; onChange: (from: string, to: string) => void;
+  options?: { date: string; n: number }[]; accentColor?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, []);
+  const isActive = !!(from || to);
+  const label = isActive
+    ? (from && from === to ? `ETA ${fmtDate(from)}` : `${from ? fmtDate(from) : "…"} – ${to ? fmtDate(to) : "…"}`)
+    : "Fecha ETA";
+  const inputStyle: React.CSSProperties = { width: "100%", padding: "5px 8px", borderRadius: 6, border: `1px solid ${T.borderLight}`, background: T.surfaceAlt, fontSize: 12, color: T.ink, outline: "none", fontFamily: "inherit" };
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, border: `1px solid ${isActive ? accentColor + "40" : T.borderLight}`, background: isActive ? accentColor + "08" : T.surface, color: isActive ? accentColor : T.inkMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+        {label}
+        {isActive && <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 5, background: accentColor, color: "#fff", fontSize: 10, fontWeight: 700 }}>1</span>}
+        <ChevronDown className="w-3 h-3" style={{ opacity: 0.5 }} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 50, width: 250, maxHeight: 380, borderRadius: 12, background: "rgba(255,255,255,0.97)", backdropFilter: "blur(16px)", border: `1px solid ${T.borderLight}`, boxShadow: T.shadowLg, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {options.length > 0 && (
+            <>
+              <div style={{ padding: "8px 12px 4px", fontSize: 10.5, fontWeight: 700, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fechas disponibles</div>
+              <div style={{ overflowY: "auto", maxHeight: 170, padding: "0 6px 6px" }}>
+                {options.map((o) => {
+                  const sel = from === o.date && to === o.date;
+                  return (
+                    <div key={o.date} onClick={() => { onChange(sel ? "" : o.date, sel ? "" : o.date); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 8px", borderRadius: 6, cursor: "pointer", marginBottom: 1, background: sel ? accentColor + "0A" : "transparent" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: sel ? accentColor : T.surfaceAlt, border: `1.5px solid ${sel ? accentColor : T.border}` }}>{sel && <Check className="w-2.5 h-2.5" style={{ color: "#fff" }} />}</span>
+                        <span style={{ fontSize: 12, color: sel ? T.ink : T.inkSoft, fontWeight: sel ? 600 : 400, fontFamily: "var(--font-jetbrains-mono), monospace" }}>{fmtDate(o.date)}</span>
+                      </span>
+                      <span style={{ fontSize: 10.5, color: T.inkLight, fontWeight: 600 }}>{o.n} op{o.n !== 1 ? "s" : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          <div style={{ padding: "10px 12px 12px", borderTop: options.length ? `1px solid ${T.borderLight}` : "none", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.05em" }}>O elige un rango</div>
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>ETA desde</div>
+              <input type="date" value={from} onChange={(e) => onChange(e.target.value, to)} style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: T.inkLight, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>ETA hasta</div>
+              <input type="date" value={to} onChange={(e) => onChange(from, e.target.value)} style={inputStyle} />
+            </div>
+            {isActive && (
+              <button onClick={() => { onChange("", ""); setOpen(false); }} style={{ width: "100%", padding: "5px 0", borderRadius: 6, border: "none", background: T.surfaceAlt, color: T.inkMuted, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Limpiar fechas</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

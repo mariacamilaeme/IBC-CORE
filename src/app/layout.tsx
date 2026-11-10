@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { DM_Sans, JetBrains_Mono, Instrument_Serif, Space_Grotesk } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { CleanupServiceWorker } from "@/components/cleanup-service-worker";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -48,6 +49,7 @@ export default function RootLayout({
         className={`${dmSans.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable} ${spaceGrotesk.variable} antialiased`}
         style={{ fontFamily: "'DM Sans', var(--font-dm-sans), sans-serif" }}
       >
+        <CleanupServiceWorker />
         <TooltipProvider>
           {children}
         </TooltipProvider>

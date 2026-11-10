@@ -45,7 +45,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { vessel_name, etd, eta_initial, eta_final, status: newStatus } = body;
+    const { vessel_name, contract_ids, etd, eta_initial, eta_final, status: newStatus } = body;
 
     if (!vessel_name || typeof vessel_name !== "string" || !vessel_name.trim()) {
       return NextResponse.json(
@@ -53,6 +53,13 @@ export async function PATCH(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // contract_ids (opcional): restringe la actualización a esos contratos.
+    // Necesario cuando una motonave tiene varios VIAJES (mismo nombre, ETAs
+    // separadas) y solo se debe tocar el grupo del viaje abierto en pantalla.
+    const idFilter: string[] | null = Array.isArray(contract_ids) && contract_ids.length > 0
+      ? contract_ids.filter((v: unknown): v is string => typeof v === "string" && v.length > 0)
+      : null;
 
     const VALID_STATUSES = [
       "EN PRODUCCIÓN",
@@ -115,10 +122,12 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Fetch existing contracts for this vessel (for audit log)
-    const { data: existingContracts, error: fetchError } = await supabase
+    let fetchQuery = supabase
       .from("contracts")
       .select("id, client_contract, etd, eta_initial, eta_final, delivery_month, delivery_year, status")
       .eq("vessel_name", vessel_name.trim());
+    if (idFilter) fetchQuery = fetchQuery.in("id", idFilter);
+    const { data: existingContracts, error: fetchError } = await fetchQuery;
 
     if (fetchError) {
       console.error("Error fetching vessel contracts:", fetchError);
@@ -135,12 +144,13 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Update ALL contracts for this vessel
-    const { data: updatedContracts, error: updateError } = await supabase
+    // Update contracts for this vessel (solo los del viaje si vino idFilter)
+    let updateQuery = supabase
       .from("contracts")
       .update(updateData)
-      .eq("vessel_name", vessel_name.trim())
-      .select("id, client_contract");
+      .eq("vessel_name", vessel_name.trim());
+    if (idFilter) updateQuery = updateQuery.in("id", idFilter);
+    const { data: updatedContracts, error: updateError } = await updateQuery.select("id, client_contract");
 
     if (updateError) {
       console.error("Error updating vessel contracts:", updateError);
@@ -197,11 +207,15 @@ export async function PATCH(request: NextRequest) {
       try {
         const trimmedVessel = vessel_name.trim();
 
-        const { data: vesselContracts } = await supabase
+        let vcQuery = supabase
           .from("contracts")
           .select("id, client_contract, arrival_port, etd, eta_final")
           .eq("vessel_name", trimmedVessel)
           .eq("is_active", true);
+        // Con contract_ids el alcance es SOLO el viaje actualizado — las
+        // fechas de los recordatorios no deben mezclarse con otros viajes.
+        if (idFilter) vcQuery = vcQuery.in("id", idFilter);
+        const { data: vesselContracts } = await vcQuery;
 
         if (vesselContracts && vesselContracts.length > 0) {
           const contractLabels = vesselContracts
@@ -230,6 +244,8 @@ export async function PATCH(request: NextRequest) {
             return d.toISOString().split("T")[0];
           };
 
+          // ilike con prefijo: cubre títulos simples ("Zarpe: X") y con viaje
+          // ("Zarpe: X · VIAJE 2") que genera /api/shipping-alerts.
           const [zarpeResp, arriboResp] = await Promise.all([
             supabase
               .from("reminders")
@@ -237,18 +253,22 @@ export async function PATCH(request: NextRequest) {
               .eq("type", "motonave")
               .eq("is_active", true)
               .eq("is_completed", false)
-              .eq("title", `Zarpe: ${trimmedVessel}`),
+              .ilike("title", `Zarpe: ${trimmedVessel}%`),
             supabase
               .from("reminders")
               .select("id, title, related_entity_id")
               .eq("type", "motonave")
               .eq("is_active", true)
               .eq("is_completed", false)
-              .ilike("title", `Arribo: ${trimmedVessel} → %`),
+              .ilike("title", `Arribo: ${trimmedVessel}%`),
           ]);
 
-          const zarpeReminders = zarpeResp.data || [];
-          const arriboReminders = arriboResp.data || [];
+          // Si la actualización vino con contract_ids (un viaje concreto),
+          // no tocar recordatorios ligados a contratos de OTRO viaje.
+          const inScope = (r: { related_entity_id: string | null }) =>
+            !idFilter || !r.related_entity_id || vesselContracts.some((c) => c.id === r.related_entity_id);
+          const zarpeReminders = (zarpeResp.data || []).filter(inScope);
+          const arriboReminders = (arriboResp.data || []).filter(inScope);
 
           for (const r of zarpeReminders) {
             if (etd === undefined) continue;

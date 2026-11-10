@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Loader2, Wallet, ChevronDown } from "lucide-react";
+import { Loader2, Wallet, ChevronDown, Download } from "lucide-react";
 import {
   type CarteraData, type Group, type EstadoCartera,
-  ESTADO_META, fmtMoney, fmtMoneyShort, fmtNum, fmtDate, deadlineISO, isoFromDate, DEADLINE_DAYS, EstadoBadge,
+  ESTADO_META, fmtMoney, fmtMoneyShort, fmtNum, fmtDate, deadlineISO, isoFromDate, DEADLINE_DAYS, EstadoBadge, parseUTC, todayUTC,
 } from "./_core";
 import { T } from "@/lib/design-tokens";
+import { displayContract } from "@/lib/utils";
 
 const AG2 = { porVencer: "#16A34A", d0_30: "#CA8A04", d31_60: "#F97316", d60: "#DC2626", sinFecha: "#C0C7D0" };
 
@@ -44,8 +45,9 @@ function ImpactDonut({ atrasado, porVencer, sinFecha, size = 178 }: { atrasado: 
   );
 }
 
-function ClientCard({ g, delay }: { g: Group; delay: number }) {
+function ClientCard({ g, delay, onDownload }: { g: Group; delay: number; onDownload: (g: Group) => Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const counts = useMemo(() => {
     const a = { ATRASADO: 0, A_TIEMPO: 0, ADELANTADO: 0, SIN_FECHA: 0 } as Record<EstadoCartera, number>;
     const m = { ATRASADO: 0, A_TIEMPO: 0, ADELANTADO: 0, SIN_FECHA: 0 } as Record<EstadoCartera, number>;
@@ -80,6 +82,23 @@ function ClientCard({ g, delay }: { g: Group; delay: number }) {
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: overdue ? T.danger : T.ink, letterSpacing: "-0.03em", fontFamily: "var(--font-jetbrains-mono), monospace", lineHeight: 1 }}>{fmtMoney(g.total)}</div>
         </div>
+        <button
+          type="button"
+          title={`Descargar el reporte de cartera de ${g.client} en Excel`}
+          disabled={downloading}
+          onClick={async (e) => {
+            e.stopPropagation();
+            setDownloading(true);
+            try { await onDownload(g); } finally { setDownloading(false); }
+          }}
+          style={{
+            flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            width: 30, height: 30, borderRadius: 8, border: `1px solid ${T.borderLight}`,
+            background: T.surfaceAlt, color: T.accent, cursor: downloading ? "wait" : "pointer",
+          }}
+        >
+          {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        </button>
         <ChevronDown className="w-4 h-4" style={{ color: T.inkLight, flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
       </div>
 
@@ -94,15 +113,46 @@ function ClientCard({ g, delay }: { g: Group; delay: number }) {
           {g.items.map((r, i) => (
             <div key={r.c.id || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderTop: `1px solid ${T.borderLight}` }}>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace", whiteSpace: "nowrap" }}>{r.c.client_contract || "—"}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: T.accent, fontFamily: "var(--font-jetbrains-mono), monospace", whiteSpace: "nowrap" }}>{displayContract(r.c)}</span>
                   <EstadoBadge estado={r.estado} days={r.days} small />
+                  {r.vesselLabel && (
+                    <span
+                      title={`Motonave: ${r.vesselLabel}${r.vesselLabel.includes("· VIAJE") ? " (mismo nombre, viaje distinto según las ETAs)" : ""}`}
+                      style={{
+                        fontSize: 10, fontWeight: 700, color: T.inkSoft,
+                        background: T.surface, border: `1px solid ${T.borderLight}`,
+                        padding: "1px 7px", borderRadius: 5,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        maxWidth: 200,
+                      }}
+                    >
+                      {r.vesselLabel}
+                    </span>
+                  )}
                 </div>
                 <div title={r.c.detail || ""} style={{ fontSize: 11, color: T.inkLight, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.c.detail || "—"}</div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 800, color: T.inkSoft, fontFamily: "var(--font-jetbrains-mono), monospace", lineHeight: 1.1 }}>{fmtNum(r.c.pending_client_amount)}</div>
-                <div style={{ fontSize: 10, color: T.inkLight, marginTop: 2, fontFamily: "var(--font-jetbrains-mono), monospace" }}>ETA {fmtDate(r.c.eta_final)} · venc {fmtDate(deadlineISO(r.c.eta_final))}</div>
+                <div style={{ fontSize: 10, color: T.inkLight, marginTop: 2, fontFamily: "var(--font-jetbrains-mono), monospace" }}>ETA {fmtDate(r.c.eta_final)} · deadline MV {fmtDate(r.pay.mvDeadline)}</div>
+                <div title={r.pay.terms ? `Término de pago (JPB): ${r.pay.terms}` : "Sin término especial: vence en el deadline de la motonave"}
+                  style={{ fontSize: 10, marginTop: 1, fontFamily: "var(--font-jetbrains-mono), monospace", fontWeight: r.pay.special || r.pay.pendingLabel ? 700 : 500, color: r.estado === "ATRASADO" ? T.danger : r.pay.special || r.pay.pendingLabel ? T.accent : T.inkLight }}>
+                  venc. pago {r.pay.dueDate ? fmtDate(r.pay.dueDate) : (r.pay.pendingLabel || "—")}{r.pay.special && r.pay.terms && /bl/i.test(r.pay.terms) ? " · BL" : ""}
+                </div>
+                {(() => {
+                  const eta = parseUTC(r.c.eta_final);
+                  if (!eta) return null;
+                  const dEta = Math.round((eta.getTime() - todayUTC().getTime()) / 86400000);
+                  const released = /^(OK|SI|SÍ|LIBERADO)/i.test((r.c.bl_released || "").trim());
+                  if (released || dEta < 0 || dEta > 20) return null;
+                  return (
+                    <div title="El embarque está próximo a arribar: notificar al cliente y solicitar la liberación oportuna"
+                      style={{ display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 700, color: T.beacon, background: T.beaconBg, padding: "1px 6px", borderRadius: 5 }}>
+                      {dEta === 0 ? "Arriba hoy" : `Arriba en ${dEta} d`} · pedir liberación
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -194,7 +244,7 @@ export default function VariantAurora({ d }: { d: CarteraData }) {
         <div className="flex flex-col items-center justify-center" style={{ padding: "60px 0", color: T.inkLight }}><Wallet className="w-10 h-10 mb-3" /><p style={{ fontSize: 13, fontWeight: 500 }}>Sin operaciones con saldo pendiente</p></div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, alignItems: "start" }}>
-          {groups.map((g, i) => <ClientCard key={g.client} g={g} delay={80 + i * 35} />)}
+          {groups.map((g, i) => <ClientCard key={g.client} g={g} delay={80 + i * 35} onDownload={d.handleDownloadExcelCliente} />)}
         </div>
       )}
 

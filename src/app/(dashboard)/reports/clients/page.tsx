@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { Download, Loader2, Users, RefreshCw, FileDown, Search, X, ChevronDown, Check, Filter } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { displayContract } from "@/lib/utils";
 import { generatePDFReport, type PDFColumn } from "@/lib/pdf-report";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
@@ -475,7 +476,7 @@ export default function ClientsReportPage() {
         const allValues: Record<string, unknown> = {
           contract_date: toDate(c.contract_date),
           china_contract: c.china_contract || "",
-          client_contract: c.client_contract || "",
+          client_contract: displayContract(c, ""),
           commercial_name: c.commercial_name || "",
           client_name: c.client_name || "",
           country: c.country || "",
@@ -685,7 +686,7 @@ export default function ClientsReportPage() {
         data: exportData.map((c) => ({
           contract_date: fmtDate(c.contract_date),
           china_contract: c.china_contract || "",
-          client_contract: c.client_contract || "",
+          client_contract: displayContract(c, ""),
           commercial_name: c.commercial_name || "",
           client_name: c.client_name || "",
           country: c.country || "",

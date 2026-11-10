@@ -321,6 +321,20 @@ export default function ReportsHubPage() {
           stat={carteraTotal >= 1_000_000 ? `$${(carteraTotal / 1_000_000).toFixed(2)}M` : carteraTotal >= 1_000 ? `$${(carteraTotal / 1_000).toFixed(0)}K` : `$${carteraTotal.toFixed(0)}`}
           statLabel="por cobrar"
         />
+        <ModuleCard
+          delay={600}
+          href="/reports/pagos-comerciales"
+          icon={I.payment}
+          accentColor={T.accent}
+          title="Pagos × Comerciales"
+          desc="Saldos de pedidos en tránsito y anticipos pendientes de cada comercial, con Excel individual para enviarles"
+          tags={[
+            { icon: I.table, label: "Por comercial" },
+            { icon: I.download, label: "Excel" },
+          ]}
+          stat={String(commercialsCount)}
+          statLabel="comerciales"
+        />
         {!HIDDEN_REPORTS.has("payments") && (
         <ModuleCard
           delay={650}

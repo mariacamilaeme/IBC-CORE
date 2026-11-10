@@ -11,6 +11,7 @@
 // ===========================================================================
 
 import type { Contract } from "@/types";
+import { VOYAGE_GAP_DAYS } from "@/lib/vessel-voyages";
 
 // ── Etapas operativas ──────────────────────────────────────────────────────
 type Stage = "produccion" | "nominado" | "transito" | "equipos";
@@ -19,7 +20,7 @@ const STAGE_META: Record<Stage, { num: string; title: string; hint: string }> = 
   produccion: { num: "01", title: "En producción", hint: "sin motonave nominada" },
   nominado: { num: "02", title: "Con nominación · por zarpar", hint: "motonave asignada, esperando zarpe" },
   transito: { num: "03", title: "En tránsito", hint: "zarpados · documentos de origen en gestión" },
-  equipos: { num: "04", title: "Equipos & proyectos", hint: "maquinaria en fabricación" },
+  equipos: { num: "04", title: "Importaciones IBC", hint: "pedidos propios IBC SAS" },
 };
 
 const STAGE_COLORS: Record<Stage, string> = {
@@ -32,12 +33,23 @@ const STAGE_COLORS: Record<Stage, string> = {
 function isEquipment(c: Contract): boolean {
   const pt = (c.product_type || "").toUpperCase();
   if (pt.includes("MAQ")) return true;
-  if ((c.china_contract || "").toUpperCase().startsWith("PT-")) return true;
-  return /machine|equipo|roll ?form|montacarga|shutter|deck|trefil/i.test(c.detail || "");
+  const d = c.detail || "";
+  if (/machine|equipo|roll ?form|montacarga|forklift|shutter|deck machine|trefilador/i.test(d)) return true;
+  // Los contratos PT- solían ser solo proyectos/maquinaria, pero China también
+  // los usa para materiales: si el detalle describe acero, es material.
+  const looksLikeSteel = /tuber|tubo|pipe|tube|teja|bobina|coil|l[aá]mina|sheet|alambr|wire|barra|\bbars?\b|angle|perfil|beam|viga|[aá]ngulo|steel/i.test(d);
+  if (looksLikeSteel) return false;
+  return (c.china_contract || "").toUpperCase().startsWith("PT-");
+}
+
+// Importaciones IBC = pedidos propios de IBC SAS (el contrato dice IBCSAS).
+// Las máquinas de clientes NO van aquí: siguen su etapa normal.
+function isIBCImport(c: Contract): boolean {
+  return (c.client_contract || "").toUpperCase().replace(/[\s-]/g, "").includes("IBCSAS");
 }
 
 function stageOf(c: Contract): Stage {
-  if (isEquipment(c)) return "equipos";
+  if (isIBCImport(c)) return "equipos";
   if (c.status === "EN TRÁNSITO") return "transito";
   if ((c.vessel_name || "").trim()) return "nominado";
   return "produccion";
@@ -81,11 +93,15 @@ function portAbbrev(port: string | null | undefined): { code: string; name: stri
 // ── Materiales (clasificación por palabra clave del detalle) ──────────────
 function materialBucket(detail: string | null | undefined): string {
   const d = (detail || "").toLowerCase();
-  if (/tuber|tubo|pipe/.test(d)) return "Tubería";
+  // Maquinaria primero: "ROLL FORMING MACHINE WITH DECOILER" contiene "coil"
+  // y "TUBE FORMING MACHINE" contiene "tube" — sin este check caerían en
+  // Bobina & lámina o Tubería.
+  if (/machine|m[aá]quina|equipo|roll ?form|decoiler|forklift|montacarga|shutter|trefil|welding/.test(d)) return "Maquinaria";
+  if (/tuber|tubo|pipe|\btubes?\b/.test(d)) return "Tubería";
   if (/teja/.test(d)) return "Teja & cubiertas";
-  if (/bobina|coil|l[aá]mina|sheet|ppg|galvaniz|prepint/.test(d)) return "Bobina & lámina";
+  if (/bobina|coil|l[aá]mina|sheet|ppg|galvaniz|prepint|strip|fleje/.test(d)) return "Bobina & lámina";
   if (/alambr|wire rod|wire/.test(d)) return "Alambrón";
-  if (/barra|bar\b|deformed|round/.test(d)) return "Barras";
+  if (/barra|\bbars?\b|deformed|round/.test(d)) return "Barras";
   if (/angle|perfil|channel|beam|viga|[aá]ngulo/.test(d)) return "Perfiles & ángulos";
   return "Otros";
 }
@@ -165,7 +181,7 @@ function extractNoteDate(note: string, refYear: number): Date | null {
   return new Date(refYear, month, day);
 }
 
-function translateNote(raw: string): string {
+export function translateNote(raw: string): string {
   let s = raw.trim();
   if (!s) return s;
   // "June 17" → "17 de junio" (reordenar antes de traducir fragmentos)
@@ -173,45 +189,142 @@ function translateNote(raw: string): string {
     new RegExp(`\\b(${NOTE_MONTH_ALT})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi"),
     (_all, mo: string, d: string) => `${parseInt(d)} de ${MONTHS_ES_LONG[NOTE_MONTHS[mo.toLowerCase()]]}`
   );
+  // Orden: primero patrones de oración completa (los más específicos),
+  // después fragmentos, y al final vocabulario suelto. Lo que no coincide
+  // con nada se conserva tal cual.
   const reps: [RegExp, string][] = [
+    // ── oraciones completas / patrones largos ──
+    [/\bthis order will be shipped\b/gi, "embarque previsto para"],
+    [/\b(?:it |the (?:order|goods|cargo) )?will be shipped (?:by|on|with) (?:a )?bulk(?:er| vessel)?\b/gi, "embarque previsto en motonave para"],
+    [/\bwill be shipped (?:by|on|with)\b/gi, "embarque previsto en"],
     [/\bwill be shipped\b/gi, "embarque previsto para"],
     [/\bplan(?:s|ning)? to ship\b/gi, "embarque previsto para"],
     [/\bplan(?:s|ning)? to finish\b/gi, "fin de producción previsto para"],
-    [/\bin production and\b/gi, "en producción ·"],
-    [/\bin production\b/gi, "en producción"],
-    [/\bbooked (?:a )?bulk vessel\b/gi, "motonave granelera reservada para"],
-    [/\bbulk vessel\b/gi, "motonave granelera"],
+    [/\bwaiting (?:for )?(?:the )?vessel and (?:the )?inform(?:ation)? (?:to|of|for|about) deliver(?:y|ing)?\b/gi, "a la espera de la motonave y de la información de entrega"],
+    [/\b(?:the )?inform(?:ation)? (?:to|of|for|about) deliver(?:y|ing)?\b/gi, "la información de entrega"],
+    [/\bwaiting (?:for )?(?:the )?vessel\b/gi, "a la espera de la motonave"],
+    [/\bwaiting (?:for )?(?:the )?customer'?s? permits?\b/gi, "a la espera de permisos del cliente"],
+    [/\bwaiting (?:for )?(?:the )?(?:down ?payment|deposit|advance(?: payment)?)\b/gi, "a la espera del anticipo"],
+    [/\bwaiting (?:for )?(?:the )?(?:balance|final) payment\b/gi, "a la espera del pago del saldo"],
+    [/\bwaiting (?:for )?(?:the )?payment\b/gi, "a la espera del pago"],
+    [/\bwaiting to (?:start )?load(?:ing)?\b/gi, "a la espera de cargue"],
+    [/\bwaiting for loading\b/gi, "a la espera de cargue"],
+    [/\bpending (?:down ?payment|deposit|advance(?: payment)?)\b/gi, "anticipo pendiente"],
+    [/\bpending (?:balance|final) payment\b/gi, "saldo pendiente"],
+    [/\bpending payment\b/gi, "pago pendiente"],
+    [/\bbooked (?:a )?bulk vessel\b/gi, "motonave reservada"],
+    [/\bbulk vessel\b/gi, "motonave"],
     [/\bthe vessel (?:was |is |has been )?delayed\b/gi, "la motonave se retrasó"],
     [/\bvessel (?:was |is |has been )?delayed\b/gi, "motonave retrasada"],
     [/\bchanged (?:to )?another vessel because of (?:the )?stowage\b/gi, "cambio de motonave por estiba"],
     [/\bchanged (?:the )?vessel\b/gi, "cambio de motonave"],
-    [/\bwaiting to (?:start )?load(?:ing)?\b/gi, "a la espera de cargue"],
-    [/\bwaiting for loading\b/gi, "a la espera de cargue"],
-    [/\bin port\b/gi, "en puerto"],
-    [/\bthe pipes\b/gi, "la tubería"],
-    [/\bwaiting (?:for )?(?:the )?customer'?s? permits?\b/gi, "a la espera de permisos del cliente"],
+    [/\b(?:will |we )?try(?:ing)? to catch this (?:vessel|motonave|ship)\b/gi, "se intentará alcanzar esta motonave"],
+    [/\b(?:but )?(?:it )?depends on (?:the )?(?:vessel|motonave|ship)(?:'s)? schedule\b/gi, "sujeto a su itinerario"],
+    [/\b(?:but )?(?:it )?depends on (?:the )?schedule\b/gi, "sujeto al itinerario"],
+    [/\bloading schedule\b/gi, "itinerario de cargue"],
+    [/\bit depends on\b/gi, "depende de"],
+    [/\bdepends on\b/gi, "depende de"],
+    [/\bproduction (?:is )?(?:finished|completed|done)\b/gi, "producción terminada"],
+    [/\bproduction will (?:be )?finish(?:ed)?\b/gi, "fin de producción previsto para"],
+    [/\bin production and\b/gi, "en producción ·"],
+    [/\bin production\b/gi, "en producción"],
     [/\bwill share (?:the )?rest (?:of the )?documents? asap\b/gi, "documentos restantes por enviar"],
     [/\bconfirmed the final dra?wing on\b/gi, "plano final confirmado el"],
+    [/\bfor (?:the )?first shipment\b/gi, "para el 1er embarque"],
+    [/\bfor (?:the )?second shipment\b/gi, "para el 2º embarque"],
     [/\b(?:the )?first shipment\b/gi, "1er embarque"],
     [/\b(?:the )?second shipment\b/gi, "2º embarque"],
+    [/\b(?:the )?third shipment\b/gi, "3er embarque"],
     [/\bATD is\b/gi, "ATD"],
     [/\bETD is\b/gi, "ETD"],
     [/\bETA is\b/gi, "ETA"],
+    // ── expresiones de tiempo ──
     [/\bend of\b/gi, "fin de"],
     [/\b(?:mid|middle) of\b/gi, "mediados de"],
     [/\bmid\b/gi, "mediados de"],
     [/\b(?:early|beginning of|start of)\b/gi, "inicios de"],
     [/\blate\b/gi, "finales de"],
-    [/\bfrom\b/gi, "desde"],
+    [/\bnext week\b/gi, "la próxima semana"],
+    [/\bthis week\b/gi, "esta semana"],
+    [/\bnext month\b/gi, "el próximo mes"],
+    [/\bas soon as possible\b/gi, "lo antes posible"],
+    [/\basap\b/gi, "lo antes posible"],
+    // ── vocabulario suelto ──
+    [/\bthis order\b/gi, "este pedido"],
+    [/\bthe order\b/gi, "el pedido"],
+    [/\b(?:down ?payment|deposit)\b/gi, "anticipo"],
+    [/\bbalance payment\b/gi, "pago del saldo"],
+    [/\bpayment received\b/gi, "pago recibido"],
+    [/\bdocuments? sent\b/gi, "documentos enviados"],
+    [/\bdocuments?\b/gi, "documentos"],
+    [/\bdeliver(?:y|ed)\b/gi, "entrega"],
+    [/\bwarehouse\b/gi, "bodega"],
+    [/\bfactory\b/gi, "fábrica"],
+    [/\bcustoms\b/gi, "aduana"],
+    [/\bload(?:ing)?\b/gi, "cargue"],
+    [/\bstowage\b/gi, "estiba"],
+    [/\bthe pipes\b/gi, "la tubería"],
+    [/\bpipes\b/gi, "tubería"],
+    [/\bin port\b/gi, "en puerto"],
+    [/\bvessel\b/gi, "motonave"],
+    [/\bshipment\b/gi, "embarque"],
+    [/\bpending\b/gi, "pendiente"],
+    [/\bconfirmed\b/gi, "confirmado"],
+    [/\bexpected\b/gi, "previsto"],
+    [/\bready\b/gi, "listo"],
+    [/\bschedule\b/gi, "itinerario"],
+    [/\btry to catch\b/gi, "intentar alcanzar"],
+    [/\bchanged\b/gi, "cambió"],
+    [/\bbut\b/gi, "pero"],
     [/\bport\b/gi, "puerto"],
+    // ── conectores que suelen quedar huérfanos ──
+    [/\bnew\b/gi, "nuevo"],
+    [/\bfrom the\b/gi, "desde el"],
+    [/\bfrom\b/gi, "desde"],
+    [/\band\b/gi, "y"],
+    [/\bwith\b/gi, "con"],
+    [/\bwithout\b/gi, "sin"],
+    [/\bfor\b/gi, "para"],
+    [/\bby\b/gi, "por"],
+    [/\bthe\b/gi, ""],
   ];
   for (const [re, to] of reps) s = s.replace(re, to);
   // meses sueltos que hayan quedado
   s = s.replace(new RegExp(`\\b(${NOTE_MONTH_ALT})\\b`, "gi"), (mo) => MONTHS_ES_LONG[NOTE_MONTHS[mo.toLowerCase()]] ?? mo);
+  // limpiar espacios dobles, duplicados ("para para") y conectores colgando antes de puntuación
+  s = s.replace(/\s{2,}/g, " ").replace(/\b(para|en|de|del|la|el) \1\b/gi, "$1").replace(/\b(para|en|de|y) ([,.;])/gi, "$2").replace(/\s+([,.;])/g, "$1").trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 const NOTE_DELAY_RE = /delay|postpon|retras|aplaz/i;
+
+// Glosario logístico: pule la salida del traductor automático para usar la
+// terminología de la casa (motonave, embarque, anticipo, itinerario…).
+const GLOSSARY: [RegExp, string][] = [
+  // barco/buque → motonave con concordancia de género
+  [/\bdel (?:barco|buque|nav[ií]o)\b/gi, "de la motonave"],
+  [/\bal (?:barco|buque|nav[ií]o)\b/gi, "a la motonave"],
+  [/\bel (?:barco|buque|nav[ií]o)\b/gi, "la motonave"],
+  [/\blos (?:barcos|buques|nav[ií]os)\b/gi, "las motonaves"],
+  [/\beste (?:barco|buque|nav[ií]o)\b/gi, "esta motonave"],
+  [/\bese (?:barco|buque|nav[ií]o)\b/gi, "esa motonave"],
+  [/\bun (?:barco|buque|nav[ií]o)\b/gi, "una motonave"],
+  [/\b(?:barcos|buques|nav[ií]os)\b/gi, "motonaves"],
+  [/\b(?:barco|buque|nav[ií]o)\b/gi, "motonave"],
+  [/\benv[ií]os\b/gi, "embarques"],
+  [/\benv[ií]o\b/gi, "embarque"],
+  [/\bdep[oó]sito\b/gi, "anticipo"],
+  [/\bhorario\b/gi, "itinerario"],
+  [/\bcapturar\b/gi, "alcanzar"],
+  [/\bprimer embarque\b/gi, "1er embarque"],
+  [/\bsegundo embarque\b/gi, "2º embarque"],
+];
+
+export function polishTranslation(s: string): string {
+  let out = s.trim();
+  for (const [re, to] of GLOSSARY) out = out.replace(re, to);
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
 
 // ── Alertas automáticas ────────────────────────────────────────────────────
 interface Alert { title: string; body: string }
@@ -301,10 +414,28 @@ function keyISO(c: Contract, stage: Stage): string | null {
 // ===========================================================================
 // Generador principal
 // ===========================================================================
+// Factura China registrada en el módulo de facturación (hoja FACTURAS del
+// Excel). Se cruza por número de contrato del cliente para mostrar en el
+// reporte que la factura ya fue compartida aunque el pedido siga en producción.
+export interface MeetingInvoice {
+  customer_contract?: string | null;
+  china_invoice_number?: string | null;
+  approved?: boolean | null;
+}
+
+const normRef = (v: string | null | undefined) => (v || "").replace(/\s+/g, "").toUpperCase();
+
 // vesselContext: contratos del módulo completo (opcional) usados SOLO como
 // evidencia de qué motonaves ya zarparon — clave cuando el informe se genera
 // a partir de un Excel anexado que no trae los pedidos en tránsito.
-export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?: Contract[]): string {
+// invoices: facturas China del módulo de facturación para cruzar por contrato.
+// Las notas se muestran en su idioma original (sin traducir) por decisión
+// del usuario 2026-08-11; el análisis de fechas/retrasos sí se mantiene.
+export function generateStatusMeetingHTML(
+  contracts: Contract[],
+  vesselContext?: Contract[],
+  invoices?: MeetingInvoice[],
+): string {
   const today = new Date();
   const dateLong = today.toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
   const dateShort = `${today.getDate()} ${MONTHS_ES[today.getMonth()]} ${today.getFullYear()}`;
@@ -317,18 +448,33 @@ export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?:
   // en tránsito aunque el contrato individual siga EN PRODUCCIÓN ────────────
   const evidence = vesselContext && vesselContext.length ? vesselContext : active;
   const SAILED_EVIDENCE = new Set(["EN TRÁNSITO", "ENTREGADO AL CLIENTE"]);
-  const sailedVessels = new Set(
-    evidence
-      .filter((c) => SAILED_EVIDENCE.has(c.status || "") && normVessel(c.vessel_name))
-      .map((c) => normVessel(c.vessel_name))
-  );
+  const refDate = (c: Contract): number | null => {
+    const iso = (c.eta_final || c.etd || "").split("T")[0];
+    if (!iso) return null;
+    const t = new Date(iso + "T00:00:00").getTime();
+    return isNaN(t) ? null : t;
+  };
+  const sailedEvidence = evidence
+    .filter((c) => SAILED_EVIDENCE.has(c.status || "") && normVessel(c.vessel_name))
+    .map((c) => ({ v: normVessel(c.vessel_name), t: refDate(c) }));
+  // Zarpó SOLO si hay evidencia del MISMO viaje: mismo nombre y fechas a
+  // menos de VOYAGE_GAP_DAYS. Una motonave que regresa meses después con el
+  // mismo nombre (viaje nuevo) no debe heredar el "ya zarpó" del anterior.
+  const sailedMatch = (c: Contract): boolean => {
+    const v = normVessel(c.vessel_name);
+    if (!v) return false;
+    const ct = refDate(c);
+    return sailedEvidence.some((e) =>
+      e.v === v && (ct == null || e.t == null || Math.abs(ct - e.t) <= VOYAGE_GAP_DAYS * 86400000)
+    );
+  };
   const todayT = today.getTime();
   const stager = (c: Contract): Stage => {
     const base = stageOf(c);
     if (base !== "nominado") return base;
     // Arrastrar a tránsito solo si su propio ETD no es futuro — evita
     // confundir un viaje nuevo de la misma motonave con el que ya zarpó
-    if (sailedVessels.has(normVessel(c.vessel_name))) {
+    if (sailedMatch(c)) {
       const etdISO = (c.etd || "").split("T")[0];
       const etdT = etdISO ? new Date(etdISO + "T00:00:00").getTime() : NaN;
       if (isNaN(etdT) || etdT <= todayT + 3 * 86400000) return "transito";
@@ -386,7 +532,8 @@ export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?:
     const raw = (c.notes || "").trim();
     if (!raw || !c.id) continue;
     const delay = NOTE_DELAY_RE.test(raw);
-    const es = translateNote(raw);
+    // Nota tal cual (en inglés): solo se analiza la fecha implícita y el retraso
+    const es = raw;
     let gapDays: number | null = null;
     const exwISO = (c.exw_date || "").split("T")[0];
     const exw = exwISO ? new Date(exwISO + "T00:00:00") : null;
@@ -479,6 +626,15 @@ export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?:
 
   const docsCompleteCount = groups.transito.filter((c) => docsState(c).state === "completos").length;
 
+  // ── Facturas China por contrato (cruce con el módulo de facturación) ──
+  const invByContract = new Map<string, MeetingInvoice[]>();
+  for (const inv of invoices ?? []) {
+    const k = normRef(inv.customer_contract);
+    if (!k || k === "N/A") continue;
+    if (!invByContract.has(k)) invByContract.set(k, []);
+    invByContract.get(k)!.push(inv);
+  }
+
   // ── Pagos: señales cruzadas del módulo de contratos ──
   const isPaid = (v: string | null | undefined) => {
     const s = (v || "").trim().toUpperCase();
@@ -517,6 +673,21 @@ export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?:
       chips.push(`<span class="chip warn" title="La motonave ya zarpó, pero este contrato sigue EN PRODUCCIÓN en el módulo — actualizar estado">▲ Estado según motonave</span>`);
     }
     if (stage === "transito") chips.push(docsChip(c));
+    // Antes del zarpe: mostrar solo la señal positiva — documentos que YA
+    // llegaron de origen (factura, PL…) y facturas China ya registradas.
+    if (stage !== "transito") {
+      const d = docsState(c);
+      if (d.sent) {
+        const short = d.sent.length > 26 ? d.sent.slice(0, 26) + "…" : d.sent;
+        chips.push(`<span class="chip okc" title="Documentos ya recibidos de origen: ${esc(d.sent)}">✓ Docs recibidos · ${esc(short)}</span>`);
+      }
+      const invs = invByContract.get(normRef(c.client_contract)) ?? [];
+      if (invs.length) {
+        const appr = invs.filter((i) => i.approved).length;
+        const nums = invs.map((i) => i.china_invoice_number).filter(Boolean).join(", ");
+        chips.push(`<span class="chip okc" title="Factura(s) China registrada(s) en facturación: ${esc(nums)}${appr ? ` · ${appr} aprobada${appr !== 1 ? "s" : ""}` : ""}">✓ Factura China ${appr ? "aprobada" : "recibida"}${invs.length > 1 ? ` (${invs.length})` : ""}</span>`);
+      }
+    }
     const pay = payChips(c, stage);
     if (pay) chips.push(pay);
     if (stage !== "transito" && meta?.delay) {
@@ -527,7 +698,7 @@ export function generateStatusMeetingHTML(contracts: Contract[], vesselContext?:
     }
 
     const noteLine = rawNote
-      ? `<div class="nline"><span class="ntag">NOTA</span><span title="Original: ${esc(rawNote)}">${esc(noteText)}</span></div>`
+      ? `<div class="nline"><span class="ntag">NOTA</span><span>${esc(rawNote)}</span></div>`
       : "";
 
     const searchable = [c.client_name, c.client_contract, c.china_contract, detail, c.vessel_name, materialBucket(c.detail)]
@@ -784,7 +955,7 @@ footer .meta b{color:var(--blue)}
       <div class="kpi" style="--kc:${STAGE_COLORS.produccion}">
         <div class="k">En producción</div>
         <div class="v">${groups.produccion.length}</div>
-        <div class="s">${fmtMT(mtOf(groups.produccion))} MT sin nominar${groups.equipos.length ? ` · + ${groups.equipos.length} equipo${groups.equipos.length !== 1 ? "s" : ""}` : ""}</div>
+        <div class="s">${fmtMT(mtOf(groups.produccion))} MT sin nominar${groups.equipos.length ? ` · + ${groups.equipos.length} importaci${groups.equipos.length !== 1 ? "ones" : "ón"} IBC` : ""}</div>
       </div>
       <div class="kpi" style="--kc:${STAGE_COLORS.nominado}">
         <div class="k">Nominado · por zarpar</div>

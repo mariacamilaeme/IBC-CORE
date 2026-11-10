@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { Download, Loader2, FileCheck2, RefreshCw, FileDown, Search } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { displayContract } from "@/lib/utils";
 import { generatePDFReport } from "@/lib/pdf-report";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
@@ -266,7 +267,7 @@ export default function DocumentTrackingPage() {
       filtered.forEach((c, idx) => {
         const row = ws.addRow([
           c.client_name || "",
-          c.client_contract || "",
+          displayContract(c, ""),
           c.china_contract || "",
           c.detail || "",
           fmtEtaShort(c.eta_final),
@@ -473,7 +474,7 @@ export default function DocumentTrackingPage() {
         ],
         data: filtered.map((c) => ({
           customer: c.client_name || "",
-          cust_contract: c.client_contract || "",
+          cust_contract: displayContract(c, ""),
           cn_contract: c.china_contract || "",
           detail: c.detail || "",
           eta: fmtEtaShort(c.eta_final),
@@ -747,9 +748,9 @@ export default function DocumentTrackingPage() {
                       {/* CUST CONTRACT */}
                       <td
                         className="px-2 py-2 text-[11px] font-semibold text-[#1E3A5F] truncate"
-                        title={c.client_contract || ""}
+                        title={displayContract(c, "")}
                       >
-                        {c.client_contract || "N/A"}
+                        {displayContract(c, "N/A")}
                       </td>
                       {/* CN CONTRACT */}
                       <td

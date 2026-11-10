@@ -649,10 +649,13 @@ export interface Contract {
   tons_difference: number | null;
   tons_compliance: string | null;
   bl_released: string | null;
+  safety_incident: string | null;
   documents_sent: string | null;
   documents_pending: string | null;
   physical_docs_sent: string | null;
   pending_client_amount: number | null;
+  /** Término/vencimiento de pago especial (columna JPB del STATUS), p. ej. "60 días BL - 7 NOV" */
+  payment_terms?: string | null;
   product_type: string | null;
   is_active: boolean | null;
   created_at?: string;

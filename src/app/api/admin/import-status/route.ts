@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { cleanPaymentTerms } from "@/lib/payment-terms";
 import * as XLSX from "xlsx";
 
 // =====================================================
@@ -116,7 +117,8 @@ function readStatusSheet(workbook: XLSX.WorkBook) {
       days_difference: cleanNumber(row["DÍAS DE DIFERENCIA ENTREGA REAL VS ENTREGA ESTIMADA (EXW)"]),
       delivery_month: cleanStringKeepZero(row["MES ENTREGA"]),
       delivery_year: cleanStringKeepZero(row["AÑO ENTREGA"]),
-      exw_compliance: cleanStringKeepZero(row["CALIFICACION"]),
+      // El Excel renombró "CALIFICACION" → "CALIFICACION TIEMPO" (oct 2026); se aceptan ambas
+      exw_compliance: cleanStringKeepZero(row["CALIFICACION TIEMPO"] ?? row["CALIFICACION"]),
       vessel_name: vesselName as string | null,
       shipping_company: shippingCompany as string | null,
       bl_number: cleanStringKeepZero(row["BL"]),
@@ -129,7 +131,9 @@ function readStatusSheet(workbook: XLSX.WorkBook) {
       documents_sent: cleanStringKeepZero(row["DOCUMENTOS ENVIADOS"]),
       documents_pending: cleanStringKeepZero(row["DOCUMENTOS PENDIENTES"]),
       physical_docs_sent: cleanStringKeepZero(row["DOCUMENTOS FISICOS ENVIADOS AL CLIENTE"]),
+      safety_incident: cleanStringKeepZero(row["INCIDENTE DE SEGURIDAD"]),
       pending_client_amount: cleanNumber(row["VALOR POR PAGAR CLIENTE"]),
+      payment_terms: cleanPaymentTerms(row["JPB"]),
       product_type: row["TIPO"] != null ? String(row["TIPO"]).trim() : null,
       is_active: true,
     });
@@ -242,24 +246,39 @@ type ContractRow = ReturnType<typeof readStatusSheet>["contracts"][number];
 type SkippedRow = ReturnType<typeof readStatusSheet>["skipped"][number];
 type InvoiceRow = ReturnType<typeof readFacturasSheet>["invoices"][number];
 
-async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
-  const existing = await fetchAll(supabase, "contracts", "id, client_contract, china_contract");
+// Clave natural normalizada: mayúsculas y sin espacios, para que
+// "PT-260250 - 028" y "PT-260250-028" se reconozcan como el mismo contrato.
+const normPart = (v: unknown) => String(v ?? "").replace(/\s+/g, "").toUpperCase();
+const contractKey = (cc: unknown, ch: unknown) => `${normPart(cc)}|${normPart(ch)}`;
 
-  // PARCIALES rename
+async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
+  const existing = await fetchAll(supabase, "contracts", "id, client_contract, china_contract, client_name, is_active, updated_at");
+
+  const batchClientContracts = new Set(contracts.map(c => normPart(c.client_contract)));
+
+  // PARCIALES rename: si el Excel trae "X-1" y la BD todavía tiene "X", renombramos.
+  // Guardas: solo si el Excel YA NO usa "X" (si lo usa, es otro contrato — p. ej. dos
+  // clientes comparten número) y solo si la fila de la BD es del MISMO cliente.
   let renamed = 0;
-  const parcialBases = new Map<string, string[]>();
+  const parcialRows = new Map<string, ContractRow[]>();
   for (const pc of contracts) {
     const cc = (pc.client_contract || "").trim();
     const m = cc.match(/^(.+)-(\d)$/);
     if (m) {
       const base = m[1];
-      if (!parcialBases.has(base)) parcialBases.set(base, []);
-      parcialBases.get(base)!.push(cc);
+      if (!parcialRows.has(base)) parcialRows.set(base, []);
+      parcialRows.get(base)!.push(pc);
     }
   }
-  for (const [base, parciales] of parcialBases.entries()) {
-    if (!parciales.includes(`${base}-1`)) continue;
-    const existingBase = existing.find(e => ((e.client_contract as string) || "").trim() === base);
+  for (const [base, parciales] of parcialRows.entries()) {
+    const parcialUno = parciales.find(p => normPart(p.client_contract) === normPart(`${base}-1`));
+    if (!parcialUno) continue;
+    if (batchClientContracts.has(normPart(base))) continue; // el Excel aún usa el nombre base → no tocar
+    const existingBase = existing.find(e =>
+      e.is_active === true &&
+      normPart(e.client_contract) === normPart(base) &&
+      normPart(e.client_name) === normPart(parcialUno.client_name)
+    );
     if (existingBase) {
       const newName = `${base}-1`;
       const { error } = await supabase.from("contracts").update({ client_contract: newName }).eq("id", existingBase.id as string);
@@ -270,26 +289,35 @@ async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
     }
   }
 
+  // Mapa de existentes por clave. Si hay filas duplicadas con la misma clave
+  // (herencia de imports anteriores), gana la activa actualizada más reciente;
+  // las demás quedarán sin match y se desactivan abajo.
   const existingMap = new Map<string, Record<string, unknown>>();
   for (const c of existing) {
-    const key = `${((c.client_contract as string) || "").trim()}|${((c.china_contract as string) || "").trim()}`;
-    existingMap.set(key, c);
+    const key = contractKey(c.client_contract, c.china_contract);
+    const prev = existingMap.get(key);
+    if (!prev) { existingMap.set(key, c); continue; }
+    const cActive = c.is_active === true, pActive = prev.is_active === true;
+    if (cActive !== pActive) { if (cActive) existingMap.set(key, c); continue; }
+    if (String(c.updated_at || "") > String(prev.updated_at || "")) existingMap.set(key, c);
   }
 
   // Dedupe por clave natural — la última fila del Excel gana (mismo resultado
   // neto que el proceso secuencial anterior, donde la última escritura pisaba a la primera)
   const byKey = new Map<string, ContractRow>();
   for (const contract of contracts) {
-    const key = `${(contract.client_contract || "").trim()}|${(contract.china_contract || "").trim()}`;
-    byKey.set(key, contract);
+    byKey.set(contractKey(contract.client_contract, contract.china_contract), contract);
   }
 
+  const matchedIds = new Set<string>();
   const toInsert: Record<string, unknown>[] = [];
   const toUpdate: Record<string, unknown>[] = [];
   for (const [key, contract] of byKey) {
     const match = existingMap.get(key);
-    if (match) toUpdate.push({ id: match.id, ...contract });
-    else toInsert.push({ ...contract });
+    if (match) {
+      matchedIds.add(match.id as string);
+      toUpdate.push({ id: match.id, ...contract });
+    } else toInsert.push({ ...contract });
   }
 
   const ins: WriteCounters = { ok: 0, errors: 0, errorSamples: [] };
@@ -298,10 +326,37 @@ async function upsertContracts(supabase: AnyClient, contracts: ContractRow[]) {
   await bulkWrite(supabase, "contracts", toInsert, "insert", ins, keyOf);
   await bulkWrite(supabase, "contracts", toUpdate, "upsert", upd, keyOf);
 
+  // El Excel es la fuente de verdad del portafolio completo: cualquier fila
+  // activa que no vino en este archivo (contrato renombrado, duplicado viejo,
+  // fila eliminada) se desactiva para que ningún módulo muestre fantasmas.
+  // Salvaguarda: si el archivo trae menos de la mitad de los contratos activos,
+  // probablemente está incompleto o es el archivo equivocado — no desactivamos nada.
+  const activeCount = existing.filter(e => e.is_active === true).length;
+  const safeToDeactivate = byKey.size >= activeCount * 0.5;
+  const stale = safeToDeactivate
+    ? existing.filter(e => e.is_active === true && !matchedIds.has(e.id as string))
+    : [];
+  let deactivated = 0;
+  const deactivatedSamples: string[] = [];
+  for (const part of chunk(stale, 100)) {
+    const ids = part.map(e => e.id as string);
+    const { error } = await supabase.from("contracts").update({ is_active: false }).in("id", ids);
+    if (!error) {
+      deactivated += ids.length;
+      for (const e of part) {
+        if (deactivatedSamples.length < 15) {
+          deactivatedSamples.push(`${(e.client_contract as string) || "(sin contrato)"} · ${(e.client_name as string) || "?"}`);
+        }
+      }
+    }
+  }
+
   return {
     inserted: ins.ok,
     updated: upd.ok,
     renamed,
+    deactivated,
+    deactivatedSamples,
     duplicates_in_file: contracts.length - byKey.size,
     errors: ins.errors + upd.errors,
     errorSamples: [...ins.errorSamples, ...upd.errorSamples].slice(0, 5),
@@ -423,6 +478,20 @@ export async function POST(request: NextRequest) {
   // 4. Upsert con service role (bypasses RLS)
   const serviceClient = await createServiceClient();
 
+  // Salvaguarda: si la columna safety_incident aún no existe en la BD
+  // (falta correr la migración), se descarta ese campo para no romper el import.
+  const warnings: string[] = [];
+  const { error: colProbe } = await serviceClient.from("contracts").select("safety_incident").limit(1);
+  if (colProbe) {
+    for (const c of contracts) delete (c as Record<string, unknown>).safety_incident;
+    warnings.push('La columna "INCIDENTE DE SEGURIDAD" no se guardó: falta ejecutar la migración 004 en Supabase (supabase/migrations/004_safety_incident.sql).');
+  }
+  const { error: termsProbe } = await serviceClient.from("contracts").select("payment_terms").limit(1);
+  if (termsProbe) {
+    for (const c of contracts) delete (c as Record<string, unknown>).payment_terms;
+    warnings.push('La columna "JPB" (vencimiento de pago) no se guardó: falta ejecutar la migración 005 en Supabase (supabase/migrations/005_payment_terms.sql).');
+  }
+
   let contractResult, invoiceResult;
   try {
     // Tablas independientes — se migran en paralelo
@@ -441,11 +510,14 @@ export async function POST(request: NextRequest) {
     sheets_found: workbook.SheetNames,
     sheets_processed: workbook.SheetNames.filter(s => PROCESSED_SHEETS.has(s)),
     sheets_ignored: ignoredSheets,
+    warnings,
     contracts: {
       total: contracts.length,
       inserted: contractResult.inserted,
       updated: contractResult.updated,
       renamed: contractResult.renamed,
+      deactivated: contractResult.deactivated,
+      deactivated_samples: contractResult.deactivatedSamples,
       duplicates_in_file: contractResult.duplicates_in_file,
       errors: contractResult.errors,
       error_samples: contractResult.errorSamples,

@@ -9,9 +9,11 @@ import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ROLE_LABELS } from "@/lib/utils";
+import { ROLE_LABELS, displayContract } from "@/lib/utils";
 
 import { T } from "@/lib/design-tokens";
+import { buildVesselLabels } from "@/lib/vessel-voyages";
+import type { Contract } from "@/types";
 
 const BEACON = "#00B8E0";
 const BEACON_INK = "#0089A8";
@@ -62,6 +64,7 @@ interface MetricsData {
     id: string;
     client_name: string;
     client_contract: string | null;
+    china_contract: string | null;
     commercial_name: string;
     vessel_name: string | null;
     eta_final: string | null;
@@ -232,6 +235,12 @@ export default function DashboardPage() {
     return null;
   });
   const [loading, setLoading] = useState(() => !metricsCache || Date.now() - metricsCache.timestamp >= CACHE_TTL);
+  // Etiquetas de viaje para el tablero de arribos: si la misma motonave
+  // aparece con ETAs muy separadas, se distingue "NOMBRE · VIAJE 2".
+  const arrivalVoyageLabels = useMemo(
+    () => buildVesselLabels((metrics?.upcoming_etas ?? []) as unknown as Contract[]),
+    [metrics]
+  );
   const [selectedYears, setSelectedYears] = useState<string[]>([String(new Date().getFullYear())]);
   const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
   const yearDropdownRef = useRef<HTMLDivElement>(null);
@@ -603,13 +612,13 @@ export default function DashboardPage() {
                       fontSize: 13.5, fontWeight: 600, color: T.accent, fontFamily: DISPLAY_FONT,
                       letterSpacing: "0.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>
-                      {(arr.vessel_name || "Sin motonave").toUpperCase()}
+                      {(arrivalVoyageLabels.get(arr.id) || arr.vessel_name || "Sin motonave").toUpperCase()}
                     </span>
                     <span style={{ fontSize: 12.5, color: T.inkSoft, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {arr.client_name}
                     </span>
                     <span style={{ fontSize: 12, color: T.inkMuted, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {arr.client_contract || "—"}
+                      {displayContract(arr)}
                     </span>
                     <span style={{ fontSize: 15 }}>{flag}</span>
                     <span style={{ fontSize: 12.5, color: T.ink, fontFamily: MONO_FONT, fontWeight: 700, textAlign: "right" }}>

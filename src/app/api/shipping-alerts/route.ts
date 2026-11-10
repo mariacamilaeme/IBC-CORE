@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { buildVesselLabels } from "@/lib/vessel-voyages";
+import type { Contract } from "@/types";
 
 // =====================================================
 // GET /api/shipping-alerts
@@ -39,10 +41,13 @@ export async function GET() {
       return NextResponse.json({ created: 0, skipped: 0 });
     }
 
-    // 2. Group contracts by vessel_name
+    // 2. Group contracts by vessel + VIAJE (una motonave que vuelve meses
+    // después con el mismo nombre es un viaje distinto — sin esto, las fechas
+    // pasadas del viaje viejo bloqueaban el recordatorio del viaje nuevo).
+    const voyageLabels = buildVesselLabels(contractsWithDates as unknown as Contract[]);
     const vesselGroups = new Map<string, typeof contractsWithDates>();
     for (const c of contractsWithDates) {
-      const key = c.vessel_name!.trim();
+      const key = (c.id && voyageLabels.get(c.id)) || c.vessel_name!.trim().toUpperCase();
       if (!vesselGroups.has(key)) vesselGroups.set(key, []);
       vesselGroups.get(key)!.push(c);
     }

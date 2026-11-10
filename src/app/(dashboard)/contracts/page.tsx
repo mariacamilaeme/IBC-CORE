@@ -258,6 +258,7 @@ function getEmptyContract(): Partial<Contract> {
     production_time_days: null,
     advance_payment_date: "",
     delivery_date_pcc: "",
+    safety_incident: "",
     exw_date: "",
     etd: "",
     eta_initial: "",
@@ -3985,7 +3986,7 @@ export default function ContractsPage() {
                           <ReadOnlyField label="Fecha Pago Anticipo" value={formatDate(formData.advance_payment_date)} icon={CreditCard} accent="amber" />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                          <ReadOnlyField label="Fecha Entrega PCC" value={formatDate(formData.delivery_date_pcc)} icon={CalendarIcon} accent="amber" />
+                          <ReadOnlyField label="Entrega Producción (PCC)" value={formatDate(formData.delivery_date_pcc)} icon={CalendarIcon} accent="amber" />
                           <ReadOnlyField label="Fecha EXW" value={formatDate(formData.exw_date)} icon={CalendarIcon} accent="amber" />
                         </div>
                         <ReadOnlyField label="Cumplimiento EXW" value={formData.exw_compliance} icon={CheckCircle2} accent="amber" />
@@ -4016,6 +4017,23 @@ export default function ContractsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <ReadOnlyField label="Mes Entrega" value={formData.delivery_month} icon={CalendarIcon} accent="emerald" />
                           <ReadOnlyField label="Año Entrega" value={formData.delivery_year} icon={CalendarIcon} accent="emerald" />
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border border-[#EDEBE7] bg-white px-3 py-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-[#5A6577]">Incidente de Seguridad</span>
+                          {(() => {
+                            const v = (formData.safety_incident || "").trim().toUpperCase();
+                            if (!v) return <span className="text-xs text-slate-300">—</span>;
+                            const esIncidente = !/^(no|n\/a|sin novedad|ninguno)$/i.test(v);
+                            return (
+                              <span className={cn(
+                                "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold",
+                                esIncidente ? "bg-rose-50 text-rose-600 border border-rose-200" : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                              )}>
+                                <span className={cn("h-1.5 w-1.5 rounded-full", esIncidente ? "bg-rose-500" : "bg-emerald-500")} />
+                                {v}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -4049,7 +4067,7 @@ export default function ContractsPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                          <Label>Fecha Entrega PCC <span className="text-[10px] text-blue-500">(auto)</span></Label>
+                          <Label>Entrega Producción (PCC) <span className="text-[10px] text-blue-500">(auto)</span></Label>
                           <Input
                             type="date"
                             value={formData.delivery_date_pcc || ""}
@@ -4135,6 +4153,18 @@ export default function ContractsPage() {
                             value={formData.delivery_year || ""}
                             onChange={(e) => updateFormField("delivery_year", e.target.value)}
                           />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label>Incidente de Seguridad</Label>
+                          <Select value={formData.safety_incident || ""} onValueChange={(v) => updateFormField("safety_incident", v || null)}>
+                            <SelectTrigger className="rounded-lg"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="NO">NO</SelectItem>
+                              <SelectItem value="SI">SI</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>

@@ -7,6 +7,30 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * Contrato a mostrar en reportes: las ventas DIRECTAS no tienen contrato con
+ * el cliente (vacío o "N/A"), en ese caso se muestra el contrato China.
+ * `fallback` es lo que se devuelve si tampoco hay contrato China ("—" o "").
+ */
+export function displayContract(
+  c: { client_contract?: string | null; china_contract?: string | null },
+  fallback = "—"
+): string {
+  const cc = (c.client_contract || "").trim();
+  if (cc && cc.toUpperCase() !== "N/A") return cc;
+  const ch = (c.china_contract || "").trim();
+  if (ch && ch.toUpperCase() !== "N/A") return ch;
+  return fallback;
+}
+
+/**
+ * ¿El BL está liberado? El Excel de STATUS usa "OK"/"PENDIENTE" en la columna
+ * LIBERACIÓN BL (también acepta "SI"/"LIBERADO" por si cambia la convención).
+ */
+export function isBlReleased(v: string | null | undefined): boolean {
+  return /^(si|ok|liberado)$/i.test((v || "").trim());
+}
+
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? parseISO(date) : date;

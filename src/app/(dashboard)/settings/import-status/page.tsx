@@ -13,11 +13,14 @@ type ImportResult = {
   sheets_found: string[];
   sheets_processed: string[];
   sheets_ignored: string[];
+  warnings?: string[];
   contracts: {
     total: number;
     inserted: number;
     updated: number;
     renamed: number;
+    deactivated: number;
+    deactivated_samples: string[];
     errors: number;
     error_samples: string[];
     skipped: number;
@@ -295,6 +298,9 @@ export default function ImportStatusPage() {
                   <Stat label="Insertados" value={result.contracts.inserted} color={T.success} />
                   <Stat label="Actualizados" value={result.contracts.updated} color={T.accent} />
                   <Stat label="Renombrados" value={result.contracts.renamed} color={T.inkMuted} />
+                  {result.contracts.deactivated > 0 && (
+                    <Stat label="Retirados (ya no están en el Excel)" value={result.contracts.deactivated} color={T.inkMuted} />
+                  )}
                   {result.contracts.skipped > 0 && (
                     <Stat label="Saltados (datos faltantes)" value={result.contracts.skipped} color={T.warning} />
                   )}
@@ -302,6 +308,16 @@ export default function ImportStatusPage() {
                     <Stat label="Errores" value={result.contracts.errors} color={T.danger} />
                   )}
                 </div>
+                {(result.contracts.deactivated_samples?.length ?? 0) > 0 && (
+                  <details style={{ marginTop: 10, fontSize: 11, color: T.inkMuted }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                      Ver retirados ({result.contracts.deactivated}{result.contracts.deactivated > result.contracts.deactivated_samples.length ? `, primeros ${result.contracts.deactivated_samples.length}` : ""})
+                    </summary>
+                    <ul style={{ marginTop: 6, paddingLeft: 16, lineHeight: 1.5 }}>
+                      {result.contracts.deactivated_samples.map((e, i) => <li key={i} style={{ wordBreak: "break-word" }}>{e}</li>)}
+                    </ul>
+                  </details>
+                )}
                 {result.contracts.skipped_details.length > 0 && (
                   <details style={{ marginTop: 10, fontSize: 11, color: T.warning }} open>
                     <summary style={{ cursor: "pointer", fontWeight: 600 }}>Ver filas saltadas ({result.contracts.skipped_details.length})</summary>
@@ -353,6 +369,9 @@ export default function ImportStatusPage() {
               {result.sheets_ignored.length > 0 && (
                 <div>Ignoradas (solo se leen STATUS y FACTURAS): <strong style={{ color: T.inkSoft }}>{result.sheets_ignored.join(", ")}</strong></div>
               )}
+              {(result.warnings?.length ?? 0) > 0 && result.warnings!.map((w, i) => (
+                <div key={i} style={{ marginTop: 6, padding: "7px 10px", borderRadius: 8, background: T.warningBg, color: T.warning, fontWeight: 600 }}>⚠ {w}</div>
+              ))}
             </div>
 
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>

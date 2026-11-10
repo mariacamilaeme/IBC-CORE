@@ -46,6 +46,16 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // El proyecto vive en OneDrive: el file-watcher pierde eventos y la caché
+  // de Turbopack sirve módulos viejos. Polling garantiza que los cambios
+  // en disco siempre se detecten.
+  turbopack: {
+    root: __dirname,
+  },
+  webpack: (config) => {
+    config.watchOptions = { poll: 1000, aggregateTimeout: 300 };
+    return config;
+  },
   async headers() {
     return [
       {

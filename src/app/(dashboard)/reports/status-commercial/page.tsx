@@ -5,6 +5,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Download, Loader2, RefreshCw, Search, X, Users, FileSpreadsheet, Briefcase } from "lucide-react";
 import { addLogoToWorkbook, addLogoToHeader } from "@/lib/excel-logo";
+import { displayContract } from "@/lib/utils";
+import { EXTRA_COMMERCIALS_BY_CLIENT, normalizeText } from "@/lib/commercial-assign";
 import { T } from "@/lib/design-tokens";
 import { Button } from "@/components/ui/button";
 import type { Contract } from "@/types";
@@ -245,7 +247,7 @@ async function buildWorkbook(commercialName: string, rowsRaw: Contract[]) {
     const values: Record<string, unknown> = {
       commercial_name: c.commercial_name || "",
       client_name: c.client_name || "",
-      client_contract: c.client_contract || "",
+      client_contract: displayContract(c, ""),
       contract_date: toDate(c.contract_date),
       country: c.country || "",
       incoterm: c.incoterm || "",
@@ -519,8 +521,7 @@ export default function StatusCommercialReportPage() {
   // Group by commercial
   const groups: CommercialGroup[] = (() => {
     const map = new Map<string, CommercialGroup>();
-    for (const c of contracts) {
-      const name = (c.commercial_name || "Sin comercial").trim();
+    const addTo = (name: string, c: Contract) => {
       if (!map.has(name)) {
         map.set(name, { name, total: 0, enProduccion: 0, enTransito: 0, entregados: 0, tons: 0, pending: 0, contracts: [] });
       }
@@ -532,6 +533,16 @@ export default function StatusCommercialReportPage() {
       else if (c.status === "EN TRÁNSITO") g.enTransito += 1;
       else if (c.status === "ENTREGADO AL CLIENTE") g.entregados += 1;
       g.contracts.push(c);
+    };
+    for (const c of contracts) {
+      const name = (c.commercial_name || "Sin comercial").trim();
+      addTo(name, c);
+      for (const extra of EXTRA_COMMERCIALS_BY_CLIENT) {
+        const client = normalizeText(c.client_name || "");
+        if (extra.clientMatch.test(client) && normalizeText(name) !== normalizeText(extra.commercial)) {
+          addTo(extra.commercial, c);
+        }
+      }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   })();
